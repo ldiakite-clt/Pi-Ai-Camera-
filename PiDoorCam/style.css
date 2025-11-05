@@ -1,0 +1,217 @@
+/* style.css — Minimal dark NVR theme
+   Works with your existing HTML structure and main.js
+   No external assets; pure CSS backgrounds and effects.
+*/
+
+/* ===== Color system ===== */
+:root{
+  --bg0:#0b0f14;       /* page base */
+  --bg1:#0e141b;       /* page blend */
+  --surface:#121923;   /* cards/panels */
+  --elev:#16202b;      /* elevated hover */
+  --border:#223041;    /* subtle borders */
+  --grid:#0f1a24;      /* background grid lines */
+  --text:#e5edf5;      /* primary text */
+  --muted:#95a7bd;     /* secondary text */
+  --accent:#22d3ee;    /* cyan accent */
+  --ok:#4ade80;        /* green */
+  --warn:#f59e0b;      /* amber */
+  --danger:#f87171;    /* red */
+  --maxw:1050px;
+}
+
+/* ===== Resets ===== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+img{display:block;max-width:100%;height:auto;border:0}
+
+/* ===== Page background (subtle grid + vignette) ===== */
+body{
+  font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 800px at 120% -10%, #18243120, transparent 60%),
+    radial-gradient(1200px 800px at -20% 110%, #0d182520, transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  min-height:100vh;
+  overflow-y:auto;
+}
+
+/* Overlay grid lines (no images) */
+body::before{
+  content:"";
+  position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    linear-gradient(transparent 31px, var(--grid) 32px),
+    linear-gradient(90deg, transparent 31px, var(--grid) 32px);
+  background-size:32px 32px, 32px 32px;
+  opacity:.35;
+}
+
+/* ===== Layout ===== */
+.container{max-width:var(--maxw);margin:0 auto;padding:1.25rem;position:relative;z-index:1}
+
+/* ===== Header ===== */
+.site-header{
+  padding:1.25rem 1.25rem .75rem;
+  text-align:center;
+  position:relative; z-index:1;
+}
+.site-header h1{margin:0 0 .35rem;font-weight:700;letter-spacing:.3px}
+.tagline{margin:0;color:var(--muted)}
+
+/* ===== Sticky Navigation (frosted) ===== */
+.site-nav{
+  position:sticky; top:0; z-index:20;
+  display:flex; gap:.5rem; justify-content:center;
+  padding:0 .5rem;
+  background:color-mix(in oklab, var(--bg1) 80%, transparent);
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  backdrop-filter:saturate(160%) blur(10px);
+}
+.site-nav a{
+  display:inline-block;
+  padding:.9rem 1.1rem;
+  text-decoration:none;
+  color:var(--text);
+  font-weight:600;
+  letter-spacing:.2px;
+  border-bottom:2px solid transparent;
+  transition:border-color .18s ease, color .18s ease, transform .1s ease;
+}
+.site-nav a:hover{color:#fff;border-bottom-color:#79e6f5}
+.site-nav a.active,
+.site-nav a[aria-current="page"]{
+  border-bottom-color:var(--accent);
+}
+
+/* ===== Hero ===== */
+.hero{
+  display:grid; gap:1rem; align-items:center;
+}
+.hero img{
+  width:100%;
+  border-radius:12px;
+  border:1px solid var(--border);
+  box-shadow:0 8px 30px #0008;
+}
+
+/* ===== Grid, cards, buttons ===== */
+.grid{display:grid; gap:1rem}
+.two-col{grid-template-columns:1fr}
+@media(min-width:900px){.two-col{grid-template-columns:1fr 1fr}}
+
+.card{
+  background:linear-gradient(180deg, var(--surface), #0f1722);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:1rem 1.1rem;
+  box-shadow:0 10px 24px -12px #000c;
+  transition:transform .12s ease, box-shadow .2s ease, background .2s ease;
+}
+.card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 16px 36px -12px #000e;
+  background:linear-gradient(180deg, var(--elev), #111a27);
+}
+
+.link-btn,.btn{
+  display:inline-block;
+  margin-top:.55rem;
+  padding:.55rem .85rem;
+  border:1px solid color-mix(in oklab, var(--accent) 65%, #ffffff 0%);
+  border-radius:10px;
+  text-decoration:none; color:#dff9ff; font-weight:700;
+  background:linear-gradient(180deg, color-mix(in oklab, var(--accent) 20%, #000 80%), #0b161f);
+  box-shadow:inset 0 1px 0 #ffffff1a, 0 8px 20px -12px #00d5ff80;
+  transition:transform .08s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+}
+.link-btn:hover,.btn:hover{
+  transform:translateY(-1px);
+  box-shadow:inset 0 1px 0 #ffffff26, 0 14px 30px -14px #00e1ff9c;
+  border-color:color-mix(in oklab, var(--accent) 85%, #ffffff 0%);
+}
+
+/* ===== Live preview frame ===== */
+.live-preview img{
+  width:100%;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:#0b1218;
+  box-shadow:
+    0 0 0 1px #0a141f inset,
+    0 10px 30px -12px #000e,
+    0 0 0 0 rgba(34,211,238,0); /* glow off by default */
+  transition:box-shadow .25s ease, filter .25s ease, border-color .2s ease;
+}
+.live-preview img:hover{
+  filter:saturate(110%);
+  box-shadow:
+    0 0 0 1px #0a141f inset,
+    0 18px 36px -16px #000f,
+    0 0 0 3px rgba(34,211,238,0.18);
+}
+
+/* ===== Heatmap ===== */
+.heatmap{
+  display:grid;
+  grid-template-columns:repeat(24,1fr);
+  gap:6px;
+  background:linear-gradient(180deg, #0e1621, #0c131c);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  box-shadow:0 10px 26px -14px #000e;
+}
+.heat-cell{
+  aspect-ratio:1 / 1.15;
+  border-radius:6px;
+  background:#1a2633; /* JS will override color */
+  box-shadow:inset 0 0 0 1px #0f1b27;
+  transition:transform .06s ease, box-shadow .12s ease, filter .12s ease;
+}
+.heat-cell:hover{
+  transform:translateY(-2px);
+  box-shadow:
+    inset 0 0 0 1px #173049,
+    0 6px 14px -8px #000d;
+  filter:brightness(1.08);
+}
+.heatmap-axis{
+  display:flex; justify-content:space-between;
+  font-size:.85rem; color:var(--muted);
+  margin-top:.4rem; letter-spacing:.3px;
+}
+
+/* ===== Text utilities ===== */
+.muted{color:var(--muted)}
+.legend{margin-top:.6rem;text-align:center;color:var(--muted)}
+.legend img{margin:0 auto;border-radius:6px;border:1px solid var(--border)}
+
+/* ===== Footer ===== */
+.site-footer{
+  text-align:center;
+  padding:2rem 1rem;
+  color:var(--muted);
+  border-top:1px solid var(--border);
+  margin-top:2rem;
+  position:relative; z-index:1;
+}
+
+/* ===== Focus and selection ===== */
+:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+  border-radius:8px;
+}
+::selection{background:color-mix(in oklab, var(--accent) 60%, #000 40%); color:#001319}
+
+/* ===== Scrollbar (WebKit) ===== */
+*::-webkit-scrollbar{height:12px;width:12px}
+*::-webkit-scrollbar-track{background:#0a1118}
+*::-webkit-scrollbar-thumb{
+  background:linear-gradient(180deg,#1b2a38,#15222f);
+  border:3px solid #0a1118;border-radius:10px;
+}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#1f3242,#193040)}

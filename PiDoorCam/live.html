@@ -1,0 +1,46 @@
+<!-- live.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PiCam Lite | Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="style.css" rel="stylesheet">
+  <script defer src="main.js"></script>
+</head>
+<body data-page="live">
+  <header class="site-header">
+    <h1>Live</h1>
+    <p class="tagline">Local MJPEG stream from the Pi</p>
+  </header>
+
+  <nav class="site-nav" aria-label="Primary">
+    <a href="index.html" data-link="home">Home</a>
+    <a href="live.html" data-link="live">Live</a>
+    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
+    <a href="access.html" data-link="access">Access</a>
+  </nav>
+
+  <main id="live-main" class="container">
+    <section class="grid two-col">
+      <div>
+        <h2>How it works</h2>
+        <ul>
+          <li>Pi serves MJPEG at http://PI_IP:8080/stream.mjpg</li>
+          <li>This page embeds that URL in an img tag.</li>
+          <li>Fallback shows a monochrome placeholder if stream is offline.</li>
+        </ul>
+        <p class="muted">Note: No media files are in the ZIP. This references the live stream only when hosted on the Pi.</p>
+      </div>
+      <div class="live-preview">
+        <img id="stream" alt="Live stream or placeholder">
+        <div class="legend">Live view when running on your LAN.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <small>&copy; <span id="year"></span> PiCam Lite</small>
+  </footer>
+</body>
+</html>

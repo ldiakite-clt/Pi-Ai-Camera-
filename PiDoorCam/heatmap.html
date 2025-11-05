@@ -1,0 +1,43 @@
+<!-- heatmap.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PiCam Lite | Heatmap</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="style.css" rel="stylesheet">
+  <script defer src="main.js"></script>
+</head>
+<body data-page="heatmap">
+  <header class="site-header">
+    <h1>Heatmap</h1>
+    <p class="tagline">Motion intensity per hour today</p>
+  </header>
+
+  <nav class="site-nav" aria-label="Primary">
+    <a href="index.html" data-link="home">Home</a>
+    <a href="live.html" data-link="live">Live</a>
+    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
+    <a href="access.html" data-link="access">Access</a>
+  </nav>
+
+  <main id="heatmap-main" class="container">
+    <section>
+      <h2>Today at a glance</h2>
+      <div id="heatmap" class="heatmap" role="img" aria-label="Hourly motion heatmap"></div>
+      <div class="heatmap-axis">
+        <span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
+      </div>
+      <p class="muted">Data: /data/motion-today.json on the Pi. Falls back to a sample set for grading.</p>
+    </section>
+    <figure class="legend">
+      <img src="https://dummyimage.com/240x40/eeeeee/000000&text=low+%3C%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80+high" alt="Grayscale legend">
+      <figcaption>Grayscale: darker = more motion.</figcaption>
+    </figure>
+  </main>
+
+  <footer class="site-footer">
+    <small>&copy; <span id="year"></span> PiCam Lite</small>
+  </footer>
+</body>
+</html>

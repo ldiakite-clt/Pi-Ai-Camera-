@@ -1,0 +1,58 @@
+<!-- index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PiCam Lite | Home</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="style.css" rel="stylesheet">
+  <script defer src="main.js"></script>
+</head>
+<body data-page="home">
+  <header class="site-header">
+    <h1>PiCam Lite</h1>
+    <p class="tagline">Raspberry Pi 5 + AI camera. Local stream, hourly motion heatmap.</p>
+  </header>
+
+  <nav class="site-nav" aria-label="Primary">
+    <a href="index.html" data-link="home">Home</a>
+    <a href="live.html" data-link="live">Live</a>
+    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
+    <a href="access.html" data-link="access">Access</a>
+  </nav>
+
+  <main id="home-main" class="container">
+    <section class="hero">
+      <div>
+        <h2>What this is</h2>
+        <p>
+          A minimal, local-first camera demo you can open on the Pi hotspot.
+          Live MJPEG stream now. Heatmap shows motion by hour. No cloud.
+        </p>
+      </div>
+    </section>
+
+    <section class="features grid">
+      <article class="card">
+        <h3>Live</h3>
+        <p>View the local MJPEG feed served by the Pi.</p>
+        <a class="link-btn" href="live.html">Open stream</a>
+      </article>
+      <article class="card">
+        <h3>Heatmap</h3>
+        <p>24-hour grayscale heatmap of motion counts.</p>
+        <a class="link-btn" href="heatmap.html">View heatmap</a>
+      </article>
+      <article class="card">
+        <h3>Access</h3>
+        <p>Hotspot plan, LAN-only access, quick security notes.</p>
+        <a class="link-btn" href="access.html">See notes</a>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <small>&copy; <span id="year"></span> PiCam Lite</small>
+  </footer>
+</body>
+</html>
