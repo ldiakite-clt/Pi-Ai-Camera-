@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PiCam Lite | Photos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="/style.css" rel="stylesheet">
+  <style>
+    .thumb{width:200px;height:150px;object-fit:cover;margin:6px;border:1px solid #ccc}
+    #grid{display:flex;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <h1>Photos</h1>
+    <p class="tagline">Captured photos from your live camera</p>
+  </header>
+
+  <nav class="site-nav" aria-label="Primary">
+    <a href="index.html" data-link="home">Home</a>
+    <a href="live.html" data-link="live">Live</a>
+    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
+    <a href="photos.html" data-link="photos">Photos</a>
+  </nav>
+
+  <main class="container">
+    <p>Captured photos from the Pi. Click to open full-size in a new tab.</p>
+    <div id="grid"></div>
+  </main>
+  <script>
+    // WebSocket listener to append new photos in real-time
+    function appendPhoto(p){
+      const grid = document.getElementById('grid')
+      const a = document.createElement('a')
+      a.href = p.path
+      a.target = '_blank'
+      const img = document.createElement('img')
+      img.src = p.path
+      img.className = 'thumb'
+      a.appendChild(img)
+      // prepend newest
+      grid.insertBefore(a, grid.firstChild)
+    }
+
+    async function load(){
+      const r = await fetch('/api/photos')
+      const j = await r.json()
+      const grid = document.getElementById('grid')
+      if(!j || !j.length) grid.textContent = 'No photos yet.'
+      j.forEach(p=>{
+        const a = document.createElement('a')
+        a.href = p.path
+        a.target = '_blank'
+        const img = document.createElement('img')
+        img.src = p.path
+        img.className = 'thumb'
+        a.appendChild(img)
+        grid.appendChild(a)
+      })
+      // connect websocket to receive live photo events
+      try{
+        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws')
+        ws.onmessage = (ev)=>{
+          try{
+            const m = JSON.parse(ev.data)
+            if(m.type === 'event' && m.name === 'photo_taken'){
+              appendPhoto({path: m.path})
+            }
+          }catch(e){ console.warn('ws parse', e) }
+        }
+      }catch(e){ /* ignore websocket errors */ }
+    }
+    load()
+  </script>
+</body>
+</html>

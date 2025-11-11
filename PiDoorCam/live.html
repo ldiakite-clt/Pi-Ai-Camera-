@@ -18,7 +18,7 @@
     <a href="index.html" data-link="home">Home</a>
     <a href="live.html" data-link="live">Live</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
-    <a href="access.html" data-link="access">Access</a>
+    <a href="photos.html" data-link="photos">Photos</a>
   </nav>
 
   <main id="live-main" class="container">
@@ -34,10 +34,58 @@
       </div>
       <div class="live-preview">
         <img id="stream" alt="Live stream or placeholder">
-        <div class="legend">Live view when running on your LAN.</div>
+        <div style="margin-top:8px">
+          <button id="capture">Capture photo</button>
+          <label style="margin-left:8px">Replay last <input id="replaySeconds" type="number" value="30" min="5" max="300" style="width:80px"> seconds</label>
+          <button id="replay">Download replay</button>
+        </div>
+        <div class="legend">Live view when running on your LAN. WebSocket live frames will update this preview when available.</div>
+        <div id="events" style="margin-top:8px;color:#333"></div>
       </div>
     </section>
   </main>
+
+  <script>
+    const streamImg = document.getElementById('stream')
+    const captureBtn = document.getElementById('capture')
+    const replayBtn = document.getElementById('replay')
+    const replaySeconds = document.getElementById('replaySeconds')
+    const eventsEl = document.getElementById('events')
+
+    // Try WebSocket feed first; fallback to MJPEG
+    let ws
+    try{
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws')
+      ws.onmessage = (ev)=>{
+        try{
+          const m = JSON.parse(ev.data)
+          if(m.type === 'frame'){
+            streamImg.src = 'data:image/jpeg;base64,' + m.data
+          } else if(m.type === 'event'){
+            eventsEl.textContent = JSON.stringify(m)
+          }
+        }catch(e){ console.warn('ws parse', e) }
+      }
+      ws.onopen = ()=>{ console.log('ws open') }
+      ws.onerror = ()=>{ console.log('ws error') }
+      ws.onclose = ()=>{ console.log('ws closed'); streamImg.src = '/stream.mjpg' }
+    }catch(e){ streamImg.src = '/stream.mjpg' }
+
+    captureBtn.onclick = async ()=>{
+      captureBtn.disabled = true
+      const r = await fetch('/api/photo', { method: 'POST' })
+      const j = await r.json()
+      eventsEl.textContent = 'Saved: ' + j.path
+      // open photos page in a new tab to view the capture
+      try{ window.open('/photos.html', '_blank') }catch(e){}
+      captureBtn.disabled = false
+    }
+
+    replayBtn.onclick = ()=>{
+      const s = parseInt(replaySeconds.value)||30
+      window.location = '/api/replay?seconds=' + s
+    }
+  </script>
 
   <footer class="site-footer">
     <small>&copy; <span id="year"></span> PiCam Lite</small>

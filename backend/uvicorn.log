@@ -1,0 +1,59 @@
+nohup: ignoring input
+INFO:     Started server process [8100]
+INFO:     Waiting for application startup.
+[1:21:05.839227618] [8100] [1;32m INFO [1;37mCamera [1;34mcamera_manager.cpp:330 [0mlibcamera v0.5.2+99-bfd68f78
+[1:21:05.851573118] [8129] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:720 [0mlibpisp version 1.3.0
+[1:21:05.855342200] [8129] [1;32m INFO [1;37mIPAProxy [1;34mipa_proxy.cpp:180 [0mUsing tuning file /usr/share/libcamera/ipa/rpi/pisp/imx500.json
+[1:21:05.864796353] [8129] [1;32m INFO [1;37mCamera [1;34mcamera_manager.cpp:220 [0mAdding camera '/base/axi/pcie@1000120000/rp1/i2c@80000/imx500@1a' for pipeline handler rpi/pisp
+[1:21:05.864889848] [8129] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:1179 [0mRegistered camera /base/axi/pcie@1000120000/rp1/i2c@80000/imx500@1a to CFE device /dev/media1 and ISP device /dev/media2 using PiSP variant BCM2712_D0
+[1:21:05.870364958] [8100] [1;32m INFO [1;37mCamera [1;34mcamera.cpp:1215 [0mconfiguring streams: (0) 640x480-XBGR8888/sRGB (1) 2028x1520-RGGB_PISP_COMP1/RAW
+[1:21:05.870629117] [8129] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:1483 [0mSensor: /base/axi/pcie@1000120000/rp1/i2c@80000/imx500@1a - Selected sensor format: 2028x1520-SRGGB10_1X10/RAW - Selected CFE format: 2028x1520-PC1R/RAW
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52816 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52816 - "GET /main.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52816 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /live.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52842 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:52854 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36552 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52826 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /photos.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /api/photos HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:36564 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52826 - "GET /home/thela/Desktop/Pi-Ai-Camera-/data/photos/photo-1762824016.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52856 - "GET /home/thela/Desktop/Pi-Ai-Camera-/data/photos/photo-1762823720.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36578 - "GET /home/thela/Desktop/Pi-Ai-Camera-/data/photos/photo-1762823674.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36568 - "GET /home/thela/Desktop/Pi-Ai-Camera-/data/photos/photo-1762823677.jpg HTTP/1.1" 404 Not Found
+INFO:     connection closed
+INFO:     127.0.0.1:36568 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36568 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36568 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36586 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:36568 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40982 - "GET /live.html HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:47232 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47242 - "GET /live.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:44180 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:47242 - "GET /status HTTP/1.1" 200 OK

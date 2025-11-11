@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+aiofiles
+python-multipart
+Pillow
+opencv-python-headless
+# picamera2 may be installed from apt on Raspberry Pi; not included here
