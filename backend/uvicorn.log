@@ -57,3 +57,8 @@ INFO:     127.0.0.1:47242 - "GET /live.html HTTP/1.1" 304 Not Modified
 INFO:     127.0.0.1:44180 - "WebSocket /ws" [accepted]
 INFO:     connection open
 INFO:     127.0.0.1:47242 - "GET /status HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8100]

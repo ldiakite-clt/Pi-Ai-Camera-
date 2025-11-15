@@ -18,7 +18,7 @@
     <a href="index.html" data-link="home">Home</a>
     <a href="live.html" data-link="live">Live</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
-    <a href="photos.html" data-link="photos">Photos</a>
+    <a href="access.html" data-link="access">Access</a>
   </nav>
 
   <main id="live-main" class="container">
@@ -76,8 +76,6 @@
       const r = await fetch('/api/photo', { method: 'POST' })
       const j = await r.json()
       eventsEl.textContent = 'Saved: ' + j.path
-      // open photos page in a new tab to view the capture
-      try{ window.open('/photos.html', '_blank') }catch(e){}
       captureBtn.disabled = false
     }
 

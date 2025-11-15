@@ -8,7 +8,7 @@ from typing import List
 import asyncio
 import base64
 import zipfile
-import logging
+from PIL import Image
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +18,6 @@ from . import database
 from pathlib import Path
 import io
 from fastapi import BackgroundTasks
-from collections import deque
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "PiDoorCam"
@@ -61,28 +60,17 @@ async def frame_broadcaster():
     fps = 5
     interval = 1.0 / fps
     while True:
-        try:
-            frame = cam.get_frame()
-            if frame:
-                b64 = base64.b64encode(frame).decode('ascii')
-                kind = getattr(cam, 'last_frame_kind', lambda: 'placeholder')()
-                msg = {"type": "frame", "data": b64, "ts": int(time.time()), "kind": kind}
-                await manager.broadcast_json(msg)
-        except Exception:
-            logging.exception('Error in frame_broadcaster')
+        frame = cam.get_frame()
+        if frame:
+            b64 = base64.b64encode(frame).decode('ascii')
+            msg = {"type": "frame", "data": b64, "ts": int(time.time())}
+            await manager.broadcast_json(msg)
         await asyncio.sleep(interval)
 
 
 @app.on_event("startup")
 async def startup_event():
-    # Ensure camera is initialized and log result, then kick off broadcaster
-    try:
-        cam = get_global_camera()
-        # warm-up capture to surface initialization errors
-        f = cam.get_frame()
-        logging.info('Camera initialized on startup; started=%s, last_kind=%s', getattr(cam, '_started', False), cam.last_frame_kind())
-    except Exception:
-        logging.exception('Camera initialization failed during startup')
+    # kick off background broadcaster
     asyncio.create_task(frame_broadcaster())
 
 
@@ -123,16 +111,41 @@ async def take_photo(background: BackgroundTasks):
     path = photos_dir / fname
     with open(path, "wb") as fh:
         fh.write(frame)
+    # generate a thumbnail to improve gallery load times
+    thumbs_dir = photos_dir / "thumbs"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        img = Image.open(io.BytesIO(frame))
+        img.thumbnail((300, 200))
+        thumb_path = thumbs_dir / fname
+        img.save(thumb_path, format="JPEG", quality=75)
+    except Exception:
+        # if thumbnail generation fails, continue without it
+        thumb_path = None
+
     database.add_photo(int(time.time()), path)
     # push event to websockets
     await manager.broadcast_json({"type": "event", "name": "photo_taken", "path": f"/data/photos/{fname}", "ts": int(time.time())})
-    return JSONResponse({"path": f"/data/photos/{fname}", "ts": int(time.time())})
+    return JSONResponse({"path": f"/data/photos/{fname}", "thumb": (f"/data/photos/thumbs/{fname}" if thumb_path else None), "ts": int(time.time())})
 
 
 @app.get("/api/photos")
 def list_photos():
     rows = database.list_photos(limit=500)
-    return JSONResponse(rows)
+    # normalize stored filesystem path to public URLs and include thumbnail if present
+    out = []
+    for r in rows:
+        p = r.get('path')
+        fname = None
+        try:
+            from pathlib import Path as _P
+            fname = _P(p).name
+        except Exception:
+            fname = None
+        public = f"/data/photos/{fname}" if fname else p
+        thumb = f"/data/photos/thumbs/{fname}" if fname else None
+        out.append({"id": r.get('id'), "timestamp": r.get('timestamp'), "path": public, "thumb": thumb})
+    return JSONResponse(out)
 
 
 @app.get("/api/events")
@@ -190,30 +203,6 @@ async def websocket_endpoint(ws: WebSocket):
             # ignore or handle pings
     except WebSocketDisconnect:
         manager.disconnect(ws)
-
-
-@app.get("/status")
-def status():
-    cam = get_global_camera()
-    # determine last frame timestamp and age
-    last_ts = None
-    try:
-        buf = getattr(cam, "_buffer", None)
-        if buf and len(buf) > 0:
-            last_ts = int(buf[-1][0])
-    except Exception:
-        last_ts = None
-    last_age = int(time.time() - last_ts) if last_ts else None
-    info = {
-        "picamera2_available": getattr(cam, "_pc2", None) is not None,
-        "pc2_started": getattr(cam, "_started", False),
-        "last_frame_ts": last_ts,
-        "last_frame_age_s": last_age,
-        "last_frame_kind": getattr(cam, 'last_frame_kind', lambda: 'placeholder')(),
-        "buffer_max_seconds": getattr(cam, "_buffer_max_seconds", None),
-        "ws_clients": len(manager.active)
-    }
-    return JSONResponse(info)
 
 
 # Mount frontend static files last so API routes take precedence
