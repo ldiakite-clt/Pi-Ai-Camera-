@@ -17,6 +17,8 @@
   <nav class="site-nav" aria-label="Primary">
     <a href="index.html" data-link="home">Home</a>
     <a href="live.html" data-link="live">Live</a>
+    <a href="photos.html" data-link="photos">Photos</a>
+    <a href="replays.html" data-link="replays">Replays</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
     <a href="access.html" data-link="access">Access</a>
   </nav>
@@ -79,9 +81,29 @@
       captureBtn.disabled = false
     }
 
-    replayBtn.onclick = ()=>{
+    replayBtn.onclick = async ()=>{
       const s = parseInt(replaySeconds.value)||30
-      window.location = '/api/replay?seconds=' + s
+      replayBtn.disabled = true
+      eventsEl.textContent = 'Creating replay...'
+      try {
+        const response = await fetch(`/api/replay?seconds=${s}`, { method: 'POST' })
+        if (response.ok) {
+          // Trigger download
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `replay-${s}s.mp4`
+          a.click()
+          URL.revokeObjectURL(url)
+          eventsEl.textContent = 'Replay saved and downloaded!'
+        } else {
+          eventsEl.textContent = 'Failed to create replay'
+        }
+      } catch (error) {
+        eventsEl.textContent = 'Error creating replay'
+      }
+      replayBtn.disabled = false
     }
   </script>
 

@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .camera import get_global_camera
 from . import database
+from . import video_utils
 from pathlib import Path
 import io
 from fastapi import BackgroundTasks
@@ -148,6 +149,33 @@ def list_photos():
     return JSONResponse(out)
 
 
+@app.delete("/api/photo/{photo_id}")
+async def delete_photo(photo_id: int):
+    path = database.delete_photo(photo_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    
+    # Delete the actual files (photo and thumbnail)
+    try:
+        photo_path = Path(path)
+        if photo_path.exists():
+            photo_path.unlink()
+        
+        # Delete thumbnail if it exists
+        photos_dir = DATA_DIR / "photos"
+        thumbs_dir = photos_dir / "thumbs"
+        thumb_path = thumbs_dir / photo_path.name
+        if thumb_path.exists():
+            thumb_path.unlink()
+    except Exception as e:
+        # Log error but still return success since DB entry is deleted
+        print(f"Error deleting files: {e}")
+    
+    # Broadcast deletion event to websockets
+    await manager.broadcast_json({"type": "event", "name": "photo_deleted", "id": photo_id})
+    return JSONResponse({"success": True, "id": photo_id})
+
+
 @app.get("/api/events")
 def get_events(limit: int = 100):
     rows = database.list_events(limit=limit)
@@ -175,22 +203,108 @@ def photo_file(filename: str):
     return FileResponse(p)
 
 
-@app.get("/api/replay")
-def replay(seconds: int = 30):
+@app.post("/api/replay")
+async def create_replay(seconds: int = 30, background: BackgroundTasks = None):
+    """Create and save a replay as MP4, then return for download"""
     if seconds <= 0 or seconds > 300:
         raise HTTPException(status_code=400, detail="seconds must be 1..300")
     cam = get_global_camera()
     frames = cam.get_recent_frames(seconds)
     if not frames:
         raise HTTPException(status_code=404, detail="no frames available")
-    # create in-memory zip of frames
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, mode="w") as zf:
-        for ts, jpeg in frames:
-            name = f"frame-{ts}.jpg"
-            zf.writestr(name, jpeg)
-    bio.seek(0)
-    return StreamingResponse(bio, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename=replay-{seconds}s.zip"})
+    
+    # Create replays directory
+    replays_dir = DATA_DIR / "replays"
+    replays_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename
+    timestamp = int(time.time())
+    filename = f"replay-{timestamp}-{seconds}s.mp4"
+    output_path = replays_dir / filename
+    
+    try:
+        # Convert frames to MP4
+        metadata = video_utils.frames_to_mp4(frames, output_path, fps=5)
+        
+        # Save to database
+        replay_id = database.add_replay(
+            timestamp=timestamp,
+            duration=metadata['duration'],
+            frame_count=metadata['frame_count'],
+            file_size=metadata['file_size'],
+            path=str(output_path)
+        )
+        
+        # Cleanup old replays (keep last 100)
+        old_paths = database.cleanup_old_replays(keep_count=100)
+        for old_path in old_paths:
+            try:
+                Path(old_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        
+        # Broadcast event to websockets
+        await manager.broadcast_json({
+            "type": "event",
+            "name": "replay_saved",
+            "id": replay_id,
+            "duration": metadata['duration'],
+            "ts": timestamp
+        })
+        
+        # Return file for download
+        return FileResponse(
+            output_path,
+            media_type="video/mp4",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create replay: {str(e)}")
+
+
+@app.get("/api/replays")
+def list_replays():
+    """List all saved replays"""
+    rows = database.list_replays(limit=100)
+    out = []
+    for r in rows:
+        p = r.get('path')
+        fname = None
+        try:
+            fname = Path(p).name
+        except Exception:
+            fname = None
+        public = f"/data/replays/{fname}" if fname else p
+        out.append({
+            "id": r.get('id'),
+            "timestamp": r.get('timestamp'),
+            "duration": r.get('duration'),
+            "frame_count": r.get('frame_count'),
+            "file_size": r.get('file_size'),
+            "path": public
+        })
+    return JSONResponse(out)
+
+
+@app.delete("/api/replay/{replay_id}")
+async def delete_replay(replay_id: int):
+    """Delete a replay by ID"""
+    path = database.delete_replay(replay_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Replay not found")
+    
+    # Delete the actual file
+    try:
+        replay_path = Path(path)
+        if replay_path.exists():
+            replay_path.unlink()
+    except Exception as e:
+        print(f"Error deleting replay file: {e}")
+    
+    # Broadcast deletion event
+    await manager.broadcast_json({"type": "event", "name": "replay_deleted", "id": replay_id})
+    return JSONResponse({"success": True, "id": replay_id})
 
 
 @app.websocket("/ws")
@@ -204,6 +318,10 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(ws)
 
+
+# Mount data directory for serving photos and replays
+if DATA_DIR.exists():
+    app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 # Mount frontend static files last so API routes take precedence
 if FRONTEND_DIR.exists():

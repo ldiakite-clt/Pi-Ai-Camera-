@@ -2,35 +2,59 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>PiCam Lite | Photos</title>
+  <title>PiCam Lite | Replays</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="/style.css" rel="stylesheet">
   <style>
     #grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 20px;
       margin-top: 20px;
     }
-    .photo-card {
+    .replay-card {
       border: 1px solid #ddd;
       border-radius: 8px;
       overflow: hidden;
       background: #fff;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       transition: transform 0.2s, box-shadow 0.2s;
-      cursor: pointer;
       position: relative;
     }
-    .photo-card:hover {
+    .replay-card:hover {
       transform: translateY(-4px);
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
-    .photo-card img {
+    .replay-card video {
       width: 100%;
-      height: 180px;
+      height: 240px;
       object-fit: cover;
       display: block;
+      background: #000;
+    }
+    .replay-info {
+      padding: 12px;
+    }
+    .replay-date {
+      font-size: 14px;
+      color: #333;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .replay-time {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    .replay-meta {
+      font-size: 11px;
+      color: #999;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .replay-meta span {
+      display: inline-block;
     }
     .delete-btn {
       position: absolute;
@@ -60,21 +84,23 @@
     .delete-btn:active {
       transform: scale(0.95);
     }
-    .photo-info {
-      padding: 12px;
-      text-align: center;
-    }
-    .photo-date {
-      font-size: 14px;
-      color: #333;
+    .download-btn {
+      width: 100%;
+      padding: 8px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
       font-weight: 500;
-      margin-bottom: 4px;
+      transition: background 0.2s;
+      margin-top: 8px;
+      border-radius: 4px;
     }
-    .photo-time {
-      font-size: 12px;
-      color: #666;
+    .download-btn:hover {
+      background: #2563eb;
     }
-    .no-photos {
+    .no-replays {
       text-align: center;
       color: #999;
       padding: 40px;
@@ -82,22 +108,23 @@
     }
   </style>
 </head>
-<body data-page="photos">
+<body data-page="replays">
   <header class="site-header">
-    <h1>Photos</h1>
-    <p class="tagline">Captured photos from the Pi camera</p>
+    <h1>Replays</h1>
+    <p class="tagline">Saved replay videos from the camera</p>
   </header>
 
   <nav class="site-nav" aria-label="Primary">
     <a href="index.html" data-link="home">Home</a>
     <a href="live.html" data-link="live">Live</a>
     <a href="photos.html" data-link="photos">Photos</a>
+    <a href="replays.html" data-link="replays">Replays</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
     <a href="access.html" data-link="access">Access</a>
   </nav>
 
   <main class="container">
-    <p>Click any photo to open full-size in a new tab.</p>
+    <p>Click any video to play. Click download to save it locally.</p>
     <div id="grid"></div>
   </main>
 
@@ -119,108 +146,104 @@
       };
     }
 
-    // Fetch a live frame to use as placeholder
-    async function getLivePlaceholder() {
-      try {
-        const response = await fetch('/camera/frame');
-        const blob = await response.blob();
-        return URL.createObjectURL(blob);
-      } catch (error) {
-        return null;
-      }
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
     async function load() {
       try {
-        // Get a live frame to use as placeholder while thumbnails load
-        const placeholderUrl = await getLivePlaceholder();
-        
-        const r = await fetch('/api/photos');
-        const photos = await r.json();
+        const r = await fetch('/api/replays');
+        const replays = await r.json();
         const grid = document.getElementById('grid');
         
-        if (!photos || !photos.length) {
-          grid.innerHTML = '<div class="no-photos">No photos yet. Capture your first photo from the Live page!</div>';
+        if (!replays || !replays.length) {
+          grid.innerHTML = '<div class="no-replays">No replays yet. Capture your first replay from the Live page!</div>';
           return;
         }
         
-        // Sort by timestamp descending (most recent first)
-        photos.sort((a, b) => b.timestamp - a.timestamp);
-        
-        photos.forEach(photo => {
+        replays.forEach(replay => {
           const card = document.createElement('div');
-          card.className = 'photo-card';
-          card.onclick = () => window.open(photo.path, '_blank');
+          card.className = 'replay-card';
           
           // Add delete button
           const deleteBtn = document.createElement('button');
           deleteBtn.className = 'delete-btn';
           deleteBtn.innerHTML = '×';
-          deleteBtn.title = 'Delete photo';
+          deleteBtn.title = 'Delete replay';
           deleteBtn.onclick = async (e) => {
-            e.stopPropagation(); // Prevent opening photo when clicking delete
+            e.stopPropagation();
             
-            if (confirm('Delete this photo? This cannot be undone.')) {
+            if (confirm('Delete this replay? This cannot be undone.')) {
               try {
                 deleteBtn.disabled = true;
-                const response = await fetch(`/api/photo/${photo.id}`, { method: 'DELETE' });
+                const response = await fetch(`/api/replay/${replay.id}`, { method: 'DELETE' });
                 if (response.ok) {
-                  // Remove card from DOM with animation
                   card.style.transition = 'opacity 0.3s, transform 0.3s';
                   card.style.opacity = '0';
                   card.style.transform = 'scale(0.8)';
                   setTimeout(() => card.remove(), 300);
                 } else {
-                  alert('Failed to delete photo');
+                  alert('Failed to delete replay');
                   deleteBtn.disabled = false;
                 }
               } catch (error) {
                 console.error('Delete error:', error);
-                alert('Error deleting photo');
+                alert('Error deleting replay');
                 deleteBtn.disabled = false;
               }
             }
           };
           
-          const img = document.createElement('img');
-          // Use live frame as placeholder, then load actual thumbnail
-          if (placeholderUrl) {
-            img.src = placeholderUrl;
-          }
-          img.dataset.actualSrc = photo.thumb || photo.path;
-          img.alt = 'Photo';
-          img.loading = 'lazy';
-          
-          // Replace placeholder with actual thumbnail once loaded
-          const actualImg = new Image();
-          actualImg.onload = () => {
-            img.src = actualImg.src;
-          };
-          actualImg.src = img.dataset.actualSrc;
+          const video = document.createElement('video');
+          video.src = replay.path;
+          video.controls = true;
+          video.preload = 'metadata';
           
           const info = document.createElement('div');
-          info.className = 'photo-info';
+          info.className = 'replay-info';
           
-          const formatted = formatDate(photo.timestamp);
+          const formatted = formatDate(replay.timestamp);
           
           const dateDiv = document.createElement('div');
-          dateDiv.className = 'photo-date';
+          dateDiv.className = 'replay-date';
           dateDiv.textContent = formatted.date;
           
           const timeDiv = document.createElement('div');
-          timeDiv.className = 'photo-time';
+          timeDiv.className = 'replay-time';
           timeDiv.textContent = formatted.time;
+          
+          const metaDiv = document.createElement('div');
+          metaDiv.className = 'replay-meta';
+          metaDiv.innerHTML = `
+            <span>⏱️ ${replay.duration}s</span>
+            <span>📹 ${replay.frame_count} frames</span>
+            <span>💾 ${formatFileSize(replay.file_size)}</span>
+          `;
+          
+          const downloadBtn = document.createElement('button');
+          downloadBtn.className = 'download-btn';
+          downloadBtn.textContent = '⬇️ Download';
+          downloadBtn.onclick = () => {
+            const a = document.createElement('a');
+            a.href = replay.path;
+            a.download = `replay-${replay.timestamp}.mp4`;
+            a.click();
+          };
           
           info.appendChild(dateDiv);
           info.appendChild(timeDiv);
+          info.appendChild(metaDiv);
+          info.appendChild(downloadBtn);
           card.appendChild(deleteBtn);
-          card.appendChild(img);
+          card.appendChild(video);
           card.appendChild(info);
           grid.appendChild(card);
         });
       } catch (error) {
-        console.error('Error loading photos:', error);
-        document.getElementById('grid').innerHTML = '<div class="no-photos">Error loading photos</div>';
+        console.error('Error loading replays:', error);
+        document.getElementById('grid').innerHTML = '<div class="no-replays">Error loading replays</div>';
       }
     }
     

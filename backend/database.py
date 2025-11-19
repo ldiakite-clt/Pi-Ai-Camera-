@@ -46,6 +46,16 @@ def init_db():
         path TEXT NOT NULL
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS replays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp INTEGER NOT NULL,
+        duration INTEGER NOT NULL,
+        frame_count INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        path TEXT NOT NULL
+    )
+    """)
     conn.commit()
     conn.close()
 
@@ -105,6 +115,76 @@ def list_photos(limit=100):
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+def delete_photo(photo_id):
+    """Delete a photo by ID and return its path for file cleanup"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT path FROM photos WHERE id = ?", (int(photo_id),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    path = row["path"]
+    cur.execute("DELETE FROM photos WHERE id = ?", (int(photo_id),))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def add_replay(timestamp, duration, frame_count, file_size, path):
+    """Add a replay to the database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO replays (timestamp, duration, frame_count, file_size, path) VALUES (?, ?, ?, ?, ?)",
+                (int(timestamp), int(duration), int(frame_count), int(file_size), str(path)))
+    conn.commit()
+    cur.execute("SELECT id FROM replays WHERE path = ?", (str(path),))
+    row = cur.fetchone()
+    conn.close()
+    return row["id"] if row else None
+
+
+def list_replays(limit=100):
+    """List replays sorted by timestamp descending"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, timestamp, duration, frame_count, file_size, path FROM replays ORDER BY timestamp DESC LIMIT ?", (int(limit),))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def delete_replay(replay_id):
+    """Delete a replay by ID and return its path for file cleanup"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT path FROM replays WHERE id = ?", (int(replay_id),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    path = row["path"]
+    cur.execute("DELETE FROM replays WHERE id = ?", (int(replay_id),))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def cleanup_old_replays(keep_count=100):
+    """Delete replays beyond the keep_count limit (keeps newest)"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, path FROM replays ORDER BY timestamp DESC LIMIT -1 OFFSET ?", (int(keep_count),))
+    rows = cur.fetchall()
+    deleted_paths = []
+    for row in rows:
+        cur.execute("DELETE FROM replays WHERE id = ?", (row["id"],))
+        deleted_paths.append(row["path"])
+    conn.commit()
+    conn.close()
+    return deleted_paths
 
 
 def list_events(limit=100, label=None, start_ts=None, end_ts=None):

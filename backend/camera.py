@@ -21,8 +21,7 @@ class Camera:
         # frame buffer for recent frames: deque of (ts, jpeg_bytes)
         self._buffer = deque()
         self._buffer_max_seconds = 300  # keep up to 5 minutes by default
-        # helpful flag about last frame kind: 'placeholder' or 'real'
-        self._last_frame_kind = 'placeholder'
+
         if PICAMERA2_AVAILABLE:
             try:
                 self._pc2 = Picamera2()
@@ -44,26 +43,24 @@ class Camera:
         if self._pc2:
             try:
                 array = self._pc2.capture_array()
-                # convert numpy array (RGB) to JPEG
+                # convert numpy array to JPEG; handle different channel formats
                 img = Image.fromarray(array)
+                # JPEG doesn't support alpha; convert RGBA -> RGB
+                if img.mode == 'RGBA':
+                    img = img.convert('RGB')
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=85)
                 jpeg = buf.getvalue()
-                # mark real frame
-                self._last_frame_kind = 'real'
                 # push into buffer with timestamp
                 self._push_buffer(jpeg)
                 return jpeg
             except Exception:
                 jpeg = self._placeholder()
-                self._last_frame_kind = 'placeholder'
                 self._push_buffer(jpeg)
                 return jpeg
-        else:
-            jpeg = self._placeholder()
-            self._last_frame_kind = 'placeholder'
-            self._push_buffer(jpeg)
-            return jpeg
+        jpeg = self._placeholder()
+        self._push_buffer(jpeg)
+        return jpeg
 
     def _push_buffer(self, jpeg: bytes) -> None:
         ts = int(time.time())
@@ -80,9 +77,6 @@ class Camera:
         now = int(time.time())
         cutoff = now - seconds
         return [(ts, j) for (ts, j) in self._buffer if ts >= cutoff]
-
-    def last_frame_kind(self) -> str:
-        return getattr(self, '_last_frame_kind', 'placeholder')
 
     def _placeholder(self) -> bytes:
         w, h = self.size
