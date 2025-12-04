@@ -20,21 +20,21 @@
     <a href="photos.html" data-link="photos">Photos</a>
     <a href="replays.html" data-link="replays">Replays</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
-    <a href="access.html" data-link="access">Access</a>
   </nav>
 
   <main id="home-main" class="container">
-    <section class="hero">
+    <section class="hero-centered">
       <div>
         <h2>What this is</h2>
         <p>
-          A minimal, local-first camera demo you can open on the Pi hotspot.
-          Live MJPEG stream, photo capture, and motion heatmap. No cloud.
+          A Raspberry Pi 5 camera system with IMX500 AI sensor. Stream live video, 
+          capture photos, download video replays, and track motion patterns. 
+          Accessible via Tailscale VPN or local network. No cloud required.
         </p>
       </div>
     </section>
 
-    <section class="features grid">
+    <section class="features grid centered-grid">
       <article class="card">
         <h3>Live</h3>
         <p>View the local MJPEG feed and capture photos.</p>
@@ -46,14 +46,14 @@
         <a class="link-btn" href="photos.html">View gallery</a>
       </article>
       <article class="card">
+        <h3>Replays</h3>
+        <p>Download recent video clips as MP4 files.</p>
+        <a class="link-btn" href="replays.html">View replays</a>
+      </article>
+      <article class="card">
         <h3>Heatmap</h3>
         <p>24-hour grayscale heatmap of motion counts.</p>
         <a class="link-btn" href="heatmap.html">View heatmap</a>
-      </article>
-      <article class="card">
-        <h3>Access</h3>
-        <p>Hotspot plan, LAN-only access, quick security notes.</p>
-        <a class="link-btn" href="access.html">See notes</a>
       </article>
     </section>
   </main>

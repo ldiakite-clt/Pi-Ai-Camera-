@@ -14,8 +14,11 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .camera import get_global_camera
+from .ai_camera import get_global_ai_camera
 from . import database
 from . import video_utils
+from .object_detection import ObjectDetector, COCO_CLASSES
+from .rpicam_streaming import get_streamer, start_streamer, stop_streamer
 from pathlib import Path
 import io
 from fastapi import BackgroundTasks
@@ -54,25 +57,91 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Global object detector instance
+_object_detector = None
+
+
+def get_object_detector():
+    global _object_detector
+    if _object_detector is None:
+        _object_detector = ObjectDetector(confidence_threshold=0.55)
+    return _object_detector
+
 
 async def frame_broadcaster():
-    cam = get_global_camera()
+    """
+    Unified approach: rpicam-vid for both streaming and AI detection.
+    Single process, more stable than hybrid.
+    """
+    streamer = get_streamer()
+    
+    print("[frame_broadcaster] Using rpicam-vid for streaming + detection")
+    
     # target fps for websocket frames
     fps = 5
     interval = 1.0 / fps
+    
+    last_person_notification = 0
+    notification_cooldown = 3.0  # seconds between person notifications
+    
     while True:
-        frame = cam.get_frame()
+        # Get streaming frame from rpicam-vid
+        frame = streamer.get_frame()
+        
+        # Get detections from same rpicam-vid process
+        detections = streamer.get_detections() if streamer.is_running() else []
+        
         if frame:
             b64 = base64.b64encode(frame).decode('ascii')
             msg = {"type": "frame", "data": b64, "ts": int(time.time())}
             await manager.broadcast_json(msg)
+            
+            # Send detection results
+            if detections:
+                detection_msg = {
+                    "type": "detections",
+                    "detections": detections,
+                    "ts": int(time.time())
+                }
+                await manager.broadcast_json(detection_msg)
+                
+                # Check for person detection and send notification
+                person_count = sum(1 for d in detections if d['class'] == 'person')
+                if person_count > 0:
+                    current_time = time.time()
+                    if (current_time - last_person_notification) > notification_cooldown:
+                        notification_msg = {
+                            "type": "notification",
+                            "message": f"👤 {person_count} person{'s' if person_count > 1 else ''} detected!",
+                            "severity": "info",
+                            "ts": int(current_time)
+                        }
+                        await manager.broadcast_json(notification_msg)
+                        last_person_notification = current_time
+                        
+                        # Log detection details
+                        print(f"[Detection] {person_count} person(s) detected at {time.strftime('%H:%M:%S')}")
+                        for det in [d for d in detections if d['class'] == 'person']:
+                            print(f"  - Person: confidence={det['confidence']}, bbox={det['bbox']}")
+        
         await asyncio.sleep(interval)
 
 
 @app.on_event("startup")
 async def startup_event():
+    # Start unified rpicam-vid streamer
+    print("[startup] Starting rpicam-vid streamer...")
+    start_streamer()
+    
     # kick off background broadcaster
     asyncio.create_task(frame_broadcaster())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Stop rpicam-vid streamer
+    print("[shutdown] Stopping rpicam-vid streamer...")
+    stop_streamer()
 
 
 def mjpeg_generator():
@@ -95,17 +164,19 @@ def stream_mjpg():
 
 @app.get("/camera/frame")
 def camera_frame():
-    cam = get_global_camera()
-    frame = cam.get_frame()
+    streamer = get_streamer()
+    frame = streamer.get_frame()
+    if not frame:
+        raise HTTPException(status_code=503, detail="Camera not ready")
     return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
 
 
 @app.post("/api/photo")
 async def take_photo(background: BackgroundTasks):
-    cam = get_global_camera()
-    frame = cam.get_frame()
+    streamer = get_streamer()
+    frame = streamer.get_frame()
     if not frame:
-        raise HTTPException(status_code=500, detail="no frame")
+        raise HTTPException(status_code=503, detail="Camera not ready")
     photos_dir = DATA_DIR / "photos"
     photos_dir.mkdir(parents=True, exist_ok=True)
     fname = f"photo-{int(time.time())}.jpg"
@@ -208,10 +279,9 @@ async def create_replay(seconds: int = 30, background: BackgroundTasks = None):
     """Create and save a replay as MP4, then return for download"""
     if seconds <= 0 or seconds > 300:
         raise HTTPException(status_code=400, detail="seconds must be 1..300")
-    cam = get_global_camera()
-    frames = cam.get_recent_frames(seconds)
-    if not frames:
-        raise HTTPException(status_code=404, detail="no frames available")
+    # Note: Replay functionality needs frame buffering in rpicam_streaming
+    # For now, disable this feature
+    raise HTTPException(status_code=503, detail="Replay temporarily unavailable with rpicam-vid")
     
     # Create replays directory
     replays_dir = DATA_DIR / "replays"
@@ -301,6 +371,19 @@ async def delete_replay(replay_id: int):
             replay_path.unlink()
     except Exception as e:
         print(f"Error deleting replay file: {e}")
+
+
+@app.post("/api/test/person-detection")
+async def test_person_detection():
+    """Test endpoint to trigger a person detection notification"""
+    notification_msg = {
+        "type": "notification",
+        "message": "👤 Test: Person detected!",
+        "severity": "info",
+        "ts": int(time.time())
+    }
+    await manager.broadcast_json(notification_msg)
+    return {"status": "notification sent"}
     
     # Broadcast deletion event
     await manager.broadcast_json({"type": "event", "name": "replay_deleted", "id": replay_id})

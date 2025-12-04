@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <title>PiCam Lite | Live</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="style.css" rel="stylesheet">
+  <link href="style.css?v=3" rel="stylesheet">
   <script defer src="main.js"></script>
 </head>
 <body data-page="live">
@@ -20,29 +20,38 @@
     <a href="photos.html" data-link="photos">Photos</a>
     <a href="replays.html" data-link="replays">Replays</a>
     <a href="heatmap.html" data-link="heatmap">Heatmap</a>
-    <a href="access.html" data-link="access">Access</a>
   </nav>
 
   <main id="live-main" class="container">
-    <section class="grid two-col">
-      <div>
-        <h2>How it works</h2>
-        <ul>
-          <li>Pi serves MJPEG at http://PI_IP:8080/stream.mjpg</li>
-          <li>This page embeds that URL in an img tag.</li>
-          <li>Fallback shows a monochrome placeholder if stream is offline.</li>
-        </ul>
-        <p class="muted">Note: No media files are in the ZIP. This references the live stream only when hosted on the Pi.</p>
-      </div>
-      <div class="live-preview">
-        <img id="stream" alt="Live stream or placeholder">
-        <div style="margin-top:8px">
-          <button id="capture">Capture photo</button>
-          <label style="margin-left:8px">Replay last <input id="replaySeconds" type="number" value="30" min="5" max="300" style="width:80px"> seconds</label>
-          <button id="replay">Download replay</button>
+    <section class="live-layout">
+      <div class="live-video-container">
+        <div style="position:relative; display:inline-block;">
+          <img id="stream" alt="Live stream or placeholder">
+          <canvas id="detection-overlay" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
         </div>
-        <div class="legend">Live view when running on your LAN. WebSocket live frames will update this preview when available.</div>
-        <div id="events" style="margin-top:8px;color:#333"></div>
+      </div>
+      <div class="live-controls-sidebar">
+        <div class="control-card">
+          <h3>Capture Photo</h3>
+          <p class="control-description">Take a snapshot of the current frame</p>
+          <button id="capture" class="control-btn">📷 Capture</button>
+        </div>
+        
+        <div class="control-card">
+          <h3>Download Replay</h3>
+          <p class="control-description">Save recent video footage</p>
+          <select id="replaySeconds" class="replay-select">
+            <option value="10">10 seconds</option>
+            <option value="30" selected>30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="120">2 minutes</option>
+            <option value="180">3 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+          <button id="replay" class="control-btn">🎬 Download</button>
+        </div>
+        
+        <div id="events" class="status-display"></div>
       </div>
     </section>
   </main>
@@ -53,6 +62,14 @@
     const replayBtn = document.getElementById('replay')
     const replaySeconds = document.getElementById('replaySeconds')
     const eventsEl = document.getElementById('events')
+    const canvas = document.getElementById('detection-overlay')
+    const ctx = canvas.getContext('2d')
+    
+    // Sync canvas size with image
+    streamImg.onload = function() {
+      canvas.width = streamImg.width
+      canvas.height = streamImg.height
+    }
 
     // Try WebSocket feed first; fallback to MJPEG
     let ws
@@ -65,9 +82,72 @@
             streamImg.src = 'data:image/jpeg;base64,' + m.data
           } else if(m.type === 'event'){
             eventsEl.textContent = JSON.stringify(m)
+          } else if(m.type === 'notification'){
+            // Show toast notification
+            showToast(m.message, m.severity || 'info')
+          } else if(m.type === 'detections'){
+            // Draw bounding boxes
+            drawDetections(m.detections)
           }
         }catch(e){ console.warn('ws parse', e) }
       }
+      
+    // Draw detection bounding boxes
+    function drawDetections(detections) {
+      // Clear previous drawings
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      
+      if (!detections || detections.length === 0) return
+      
+      detections.forEach(det => {
+        const [x, y, w, h] = det.bbox
+        
+        // Convert normalized coordinates to pixels
+        const px = x * canvas.width
+        const py = y * canvas.height
+        const pw = w * canvas.width
+        const ph = h * canvas.height
+        
+        // Color based on class
+        const color = det.class === 'person' ? '#22d3ee' : '#f59e0b'
+        
+        // Draw bounding box
+        ctx.strokeStyle = color
+        ctx.lineWidth = 3
+        ctx.strokeRect(px, py, pw, ph)
+        
+        // Draw label background
+        const label = `${det.class} ${(det.confidence * 100).toFixed(0)}%`
+        ctx.font = 'bold 14px system-ui'
+        const metrics = ctx.measureText(label)
+        const labelHeight = 20
+        
+        ctx.fillStyle = color
+        ctx.fillRect(px, py - labelHeight, metrics.width + 10, labelHeight)
+        
+        // Draw label text
+        ctx.fillStyle = '#000'
+        ctx.fillText(label, px + 5, py - 5)
+      })
+    }
+      
+    // Toast notification function
+    function showToast(message, severity = 'info') {
+      const toast = document.createElement('div')
+      toast.className = `toast toast-${severity}`
+      toast.textContent = message
+      
+      document.body.appendChild(toast)
+      
+      // Trigger animation
+      setTimeout(() => toast.classList.add('show'), 10)
+      
+      // Remove after 4 seconds
+      setTimeout(() => {
+        toast.classList.remove('show')
+        setTimeout(() => toast.remove(), 300)
+      }, 4000)
+    }
       ws.onopen = ()=>{ console.log('ws open') }
       ws.onerror = ()=>{ console.log('ws error') }
       ws.onclose = ()=>{ console.log('ws closed'); streamImg.src = '/stream.mjpg' }
