@@ -9,6 +9,7 @@ import time
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
+from collections import deque
 import signal
 import os
 
@@ -56,6 +57,10 @@ class RPiCamStreaming:
         self._current_frame: Optional[bytes] = None
         self._frame_lock = threading.Lock()
         self._stream_thread: Optional[threading.Thread] = None
+        
+        # Frame buffering for replay (store last 5 minutes at 15fps = 4500 frames max)
+        self._frame_buffer = deque(maxlen=4500)
+        self._buffer_lock = threading.Lock()
         
         print(f"[RPiCamStreaming] Initialized {width}x{height} @ {framerate}fps")
     
@@ -180,6 +185,10 @@ class RPiCamStreaming:
                         # Store frame
                         with self._frame_lock:
                             self._current_frame = frame
+                        
+                        # Add to buffer for replay
+                        with self._buffer_lock:
+                            self._frame_buffer.append((time.time(), frame))
                     else:
                         break
                         
@@ -298,6 +307,19 @@ class RPiCamStreaming:
         """Get latest detections."""
         with self._detection_lock:
             return self._latest_detections.copy()
+    
+    def get_recent_frames(self, seconds: int) -> List[tuple]:
+        """Get frames from the last N seconds as (timestamp, jpeg_bytes) tuples."""
+        cutoff_time = time.time() - seconds
+        frames = []
+        
+        with self._buffer_lock:
+            for timestamp, frame in self._frame_buffer:
+                if timestamp >= cutoff_time:
+                    # Return as (timestamp_int, jpeg_bytes) tuple
+                    frames.append((int(timestamp), frame))
+        
+        return frames
     
     def is_running(self) -> bool:
         """Check if running."""

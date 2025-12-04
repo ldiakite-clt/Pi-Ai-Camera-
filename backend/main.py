@@ -279,9 +279,11 @@ async def create_replay(seconds: int = 30, background: BackgroundTasks = None):
     """Create and save a replay as MP4, then return for download"""
     if seconds <= 0 or seconds > 300:
         raise HTTPException(status_code=400, detail="seconds must be 1..300")
-    # Note: Replay functionality needs frame buffering in rpicam_streaming
-    # For now, disable this feature
-    raise HTTPException(status_code=503, detail="Replay temporarily unavailable with rpicam-vid")
+    
+    streamer = get_streamer()
+    frames = streamer.get_recent_frames(seconds)
+    if not frames:
+        raise HTTPException(status_code=404, detail="no frames available")
     
     # Create replays directory
     replays_dir = DATA_DIR / "replays"
