@@ -13,11 +13,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .camera import get_global_camera
-from .ai_camera import get_global_ai_camera
 from . import database
 from . import video_utils
-from .object_detection import ObjectDetector, COCO_CLASSES
 from .rpicam_streaming import get_streamer, start_streamer, stop_streamer
 from pathlib import Path
 import io
@@ -57,15 +54,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Global object detector instance
-_object_detector = None
 
-
-def get_object_detector():
-    global _object_detector
-    if _object_detector is None:
-        _object_detector = ObjectDetector(confidence_threshold=0.55)
-    return _object_detector
 
 
 async def frame_broadcaster():
@@ -145,10 +134,11 @@ async def shutdown_event():
 
 
 def mjpeg_generator():
-    cam = get_global_camera()
+    """MJPEG stream using rpicam_streaming"""
+    streamer = get_streamer()
     boundary = b"--frame"
     while True:
-        frame = cam.get_frame()
+        frame = streamer.get_frame()
         if not frame:
             time.sleep(0.1)
             continue
