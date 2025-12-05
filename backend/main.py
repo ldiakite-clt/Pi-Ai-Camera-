@@ -80,6 +80,10 @@ async def frame_broadcaster():
         # Get detections from same rpicam-vid process
         detections = streamer.get_detections() if streamer.is_running() else []
         
+        # Debug logging
+        if detections:
+            print(f"[DEBUG] Got {len(detections)} detections: {[d['class'] for d in detections]}")
+        
         if frame:
             b64 = base64.b64encode(frame).decode('ascii')
             msg = {"type": "frame", "data": b64, "ts": int(time.time())}
@@ -99,6 +103,18 @@ async def frame_broadcaster():
                 if person_count > 0:
                     current_time = time.time()
                     if (current_time - last_person_notification) > notification_cooldown:
+                        # Log event to database for heatmap tracking
+                        person_detections = [d for d in detections if d['class'] == 'person']
+                        print(f"[DEBUG] Logging {len(person_detections)} person events to database")
+                        for detection in person_detections:
+                            database.add_event(
+                                timestamp=int(current_time),
+                                label='person',
+                                confidence=detection.get('confidence', 0.0),
+                                snapshot_path=None
+                            )
+                            print(f"[DEBUG] Logged person event: confidence={detection.get('confidence', 0.0)}")
+                        
                         notification_msg = {
                             "type": "notification",
                             "message": f"👤 {person_count} person{'s' if person_count > 1 else ''} detected!",
