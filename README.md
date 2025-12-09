@@ -2,8 +2,6 @@
 # Pi-Ai-Camera README - December 8, 2025
 #================================================================================
 #
-# Here’s a plain summary of the Pi-Ai-Camera project:
-#
 #
 # Backend files:
 # main.py: Runs the FastAPI server, handles camera, photos, replays, and browser stuff.
