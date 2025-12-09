@@ -1,12 +1,14 @@
-<!-- live.html -->
+<!-- live.html v2 - fixed detection overlay clearing -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>PiCam Lite | Live</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="style.css?v=3" rel="stylesheet">
-  <script defer src="main.js"></script>
+  <link href="style.css?v=4" rel="stylesheet">
 </head>
 <body data-page="live">
   <header class="site-header">
@@ -81,12 +83,24 @@
           if(m.type === 'frame'){
             streamImg.src = 'data:image/jpeg;base64,' + m.data
           } else if(m.type === 'event'){
-            eventsEl.textContent = JSON.stringify(m)
+            // Handle specific events
+            if(m.name === 'replay_saved') {
+              eventsEl.textContent = `✅ Replay saved! (${m.duration}s) View on Replays page.`
+              showToast(`Replay saved (${m.duration}s)`, 'success')
+            } else if(m.name === 'photo_taken') {
+              eventsEl.textContent = 'Photo captured: ' + m.path
+            } else {
+              eventsEl.textContent = JSON.stringify(m)
+            }
           } else if(m.type === 'notification'){
             // Show toast notification
             showToast(m.message, m.severity || 'info')
+          } else if(m.type === 'error'){
+            // Show error messages
+            eventsEl.textContent = '❌ ' + m.message
+            showToast(m.message, 'error')
           } else if(m.type === 'detections'){
-            // Draw bounding boxes
+            // Draw bounding boxes - always called, even for empty detections
             drawDetections(m.detections)
           }
         }catch(e){ console.warn('ws parse', e) }
@@ -94,19 +108,23 @@
       
     // Draw detection bounding boxes
     function drawDetections(detections) {
-      // Clear previous drawings
+      // ALWAYS clear the canvas first
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       
-      if (!detections || detections.length === 0) return
+      // If no detections, we're done (canvas is now clear)
+      if (!detections || detections.length === 0) {
+        return
+      }
       
       detections.forEach(det => {
-        const [x, y, w, h] = det.bbox
+        // bbox format is [x1, y1, x2, y2] (normalized 0-1)
+        const [x1, y1, x2, y2] = det.bbox
         
         // Convert normalized coordinates to pixels
-        const px = x * canvas.width
-        const py = y * canvas.height
-        const pw = w * canvas.width
-        const ph = h * canvas.height
+        const px = x1 * canvas.width
+        const py = y1 * canvas.height
+        const pw = (x2 - x1) * canvas.width
+        const ph = (y2 - y1) * canvas.height
         
         // Color based on class
         const color = det.class === 'person' ? '#22d3ee' : '#f59e0b'
@@ -148,9 +166,16 @@
         setTimeout(() => toast.remove(), 300)
       }, 4000)
     }
-      ws.onopen = ()=>{ console.log('ws open') }
+      ws.onopen = ()=>{ 
+        console.log('ws open - clearing canvas')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+      }
       ws.onerror = ()=>{ console.log('ws error') }
-      ws.onclose = ()=>{ console.log('ws closed'); streamImg.src = '/stream.mjpg' }
+      ws.onclose = ()=>{ 
+        console.log('ws closed')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        streamImg.src = '/stream.mjpg' 
+      }
     }catch(e){ streamImg.src = '/stream.mjpg' }
 
     captureBtn.onclick = async ()=>{
@@ -164,19 +189,13 @@
     replayBtn.onclick = async ()=>{
       const s = parseInt(replaySeconds.value)||30
       replayBtn.disabled = true
-      eventsEl.textContent = 'Creating replay...'
+      eventsEl.textContent = 'Creating replay (encoding in background)...'
       try {
         const response = await fetch(`/api/replay?seconds=${s}`, { method: 'POST' })
         if (response.ok) {
-          // Trigger download
-          const blob = await response.blob()
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `replay-${s}s.mp4`
-          a.click()
-          URL.revokeObjectURL(url)
-          eventsEl.textContent = 'Replay saved and downloaded!'
+          const data = await response.json()
+          eventsEl.textContent = `Encoding ${data.seconds}s replay... Please wait.`
+          // The replay_saved event via WebSocket will update this when done
         } else {
           eventsEl.textContent = 'Failed to create replay'
         }

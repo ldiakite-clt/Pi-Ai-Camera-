@@ -6,7 +6,6 @@
   <title>PiCam Lite | Heatmap</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="style.css" rel="stylesheet">
-  <script defer src="main.js"></script>
 </head>
 <body data-page="heatmap">
   <header class="site-header">
@@ -23,30 +22,10 @@
   </nav>
 
   <main id="heatmap-main" class="container">
-    <!-- Stats Summary Panel -->
-    <div class="stats-panel">
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-value" id="total-detections">—</div>
-        <div class="stat-label">Total Detections</div>
-      </div>
-      
-      <div class="stat-card alert-stat">
-        <div class="stat-icon">🚨</div>
-        <div class="stat-value" id="alert-count">—</div>
-        <div class="stat-label">After-Hours Alerts</div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon">🕐</div>
-        <div class="stat-value" id="most-recent">—</div>
-        <div class="stat-label">Most Recent Alert</div>
-      </div>
-    </div>
 
     <section>
-      <h2>Activity Heatmap (Last 7 Days)</h2>
-      <div class="heatmap-wrapper">
+      <h2 style="text-align:center;">Activity Heatmap (This Week, Person-only)</h2>
+      <div class="heatmap-wrapper" style="max-width: 960px; margin: 0 auto; min-height: 220px;">
         <div class="heatmap-day-labels">
           <span>Mon</span>
           <span>Tue</span>
@@ -56,9 +35,11 @@
           <span>Sat</span>
           <span>Sun</span>
         </div>
-        <div id="heatmap" class="heatmap" role="img" aria-label="Hourly motion heatmap"></div>
+        <div id="heatmap" class="heatmap" role="img" aria-label="Hourly motion heatmap">
+          <div id="heatmap-loading" class="muted" style="text-align:center; padding: 16px;">Loading heatmap…</div>
+        </div>
       </div>
-      <div class="heatmap-axis">
+      <div class="heatmap-axis" style="max-width: 960px; margin: 6px auto 0;">
         <span>12AM</span><span>3AM</span><span>6AM</span><span>9AM</span><span>12PM</span><span>3PM</span><span>6PM</span><span>9PM</span>
       </div>
     </section>
@@ -87,23 +68,22 @@
   <script>
     const AFTER_HOURS_START = 0;  // 12AM
     const AFTER_HOURS_END = 5;    // 5AM
+    const DAY_TO_JS_DAY = [1, 2, 3, 4, 5, 6, 0]; // heatmap day (Mon=0) -> JS getDay (Sun=0)
 
     let heatmapData = null;
-    let photosData = [];
+    // No longer prefetch all photos; we fetch per-cell on demand
 
-    // Fetch heatmap and photos data
+    // Fetch heatmap first for faster initial render, then photos.
     async function loadData() {
       try {
-        // Fetch heatmap data (last 7 days)
-        const heatmapRes = await fetch('/api/heatmap?days=7');
+        // Fetch heatmap data (last 7 days) and render immediately
+        const heatmapRes = await fetch('/api/heatmap');
         heatmapData = await heatmapRes.json();
-        
-        // Fetch photos for thumbnail display
-        const photosRes = await fetch('/api/photos');
-        photosData = await photosRes.json();
-        
         renderHeatmap();
-        updateStats();
+        const l = document.getElementById('heatmap-loading');
+        if (l) l.remove();
+
+        // Photos now fetched on demand per cell to reduce load
       } catch (err) {
         console.error('Failed to load data:', err);
       }
@@ -171,46 +151,9 @@
       }
     }
 
-    function updateStats() {
-      if (!heatmapData || !photosData) return;
-      
-      // Calculate total detections
-      let total = 0;
-      let afterHoursCount = 0;
-      
-      Object.entries(heatmapData).forEach(([day, hours]) => {
-        Object.entries(hours).forEach(([hour, count]) => {
-          total += count;
-          const h = parseInt(hour);
-          if (h >= AFTER_HOURS_START && h < AFTER_HOURS_END) {
-            afterHoursCount += count;
-          }
-        });
-      });
-      
-      document.getElementById('total-detections').textContent = total.toLocaleString();
-      document.getElementById('alert-count').textContent = afterHoursCount.toLocaleString();
-      
-      // Find most recent after-hours photo
-      const afterHoursPhotos = photosData.filter(p => {
-        const hour = new Date(p.timestamp * 1000).getHours();
-        return hour >= AFTER_HOURS_START && hour < AFTER_HOURS_END;
-      });
-      
-      if (afterHoursPhotos.length > 0) {
-        const mostRecent = afterHoursPhotos[0]; // Assuming sorted by newest first
-        const time = new Date(mostRecent.timestamp * 1000).toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
-        document.getElementById('most-recent').textContent = time;
-      } else {
-        document.getElementById('most-recent').textContent = 'None';
-      }
-    }
+    // Removed stats cards and logic per request
 
-    function showPhotosForCell(day, hour, count, isAfterHours) {
+    async function showPhotosForCell(day, hour, count, isAfterHours) {
       if (count === 0) return;
       
       const gallery = document.getElementById('thumbnail-gallery');
@@ -219,35 +162,31 @@
       
       title.textContent = `${getDayName(day)} at ${hour}:00 ${isAfterHours ? '🚨 After Hours' : ''}`;
       
-      // Filter photos for this specific day/hour
-      const filteredPhotos = photosData.filter(p => {
-        const date = new Date(p.timestamp * 1000);
-        const photoDay = date.getDay(); // 0=Sun, 1=Mon, etc
-        const photoHour = date.getHours();
-        
-        // Convert our day index (0=Mon) to Date's day (1=Mon)
-        const adjustedDay = (day + 1) % 7;
-        return photoDay === adjustedDay && photoHour === hour;
-      });
+      // Fetch up to 3 person snapshots for this specific weekday/hour bucket from backend
+      const weekday = day; // backend expects 0=Mon..6=Sun like our heatmap
+      try {
+        const res = await fetch(`/api/heatmap/photos?weekday=${weekday}&hour=${hour}&days=7&limit=3&label=person`);
+        const filteredPhotos = await res.json();
       
-      content.innerHTML = '';
-      
-      if (filteredPhotos.length === 0) {
-        content.innerHTML = '<p class="muted">No photos captured during this period.</p>';
-      } else {
-        filteredPhotos.forEach(photo => {
-          const photoHour = new Date(photo.timestamp * 1000).getHours();
-          const isPhotoAfterHours = photoHour >= AFTER_HOURS_START && photoHour < AFTER_HOURS_END;
-          
-          const card = document.createElement('div');
-          card.className = `photo-card ${isPhotoAfterHours ? 'after-hours' : ''}`;
-          card.innerHTML = `
-            <img src="/data/photos/${photo.filename}" alt="Detection photo" loading="lazy">
-            ${isPhotoAfterHours ? '<span class="alert-badge">🚨 Alert</span>' : ''}
-            <div class="photo-time">${formatTime(photo.timestamp)}</div>
-          `;
-          content.appendChild(card);
-        });
+        content.innerHTML = '';
+        if (!Array.isArray(filteredPhotos) || filteredPhotos.length === 0) {
+          content.innerHTML = '<p class="muted">No photos captured during this period.</p>';
+        } else {
+          filteredPhotos.forEach(photo => {
+            const photoHour = new Date(photo.timestamp * 1000).getHours();
+            const isPhotoAfterHours = photoHour >= AFTER_HOURS_START && photoHour < AFTER_HOURS_END;
+            const card = document.createElement('div');
+            card.className = `photo-card ${isPhotoAfterHours ? 'after-hours' : ''}`;
+            card.innerHTML = `
+              <img src="${photo.thumb || photo.path}" alt="Detection photo" loading="lazy">
+              ${isPhotoAfterHours ? '<span class="alert-badge">🚨 Alert</span>' : ''}
+              <div class="photo-time">${formatTime(photo.timestamp)}</div>
+            `;
+            content.appendChild(card);
+          });
+        }
+      } catch (e) {
+        content.innerHTML = '<p class="muted">Failed to load photos for this cell.</p>';
       }
       
       gallery.classList.remove('hidden');
@@ -272,7 +211,7 @@
       });
     }
 
-    // Initialize on load
+    // Initialize on load: render heatmap ASAP
     loadData();
     
     // Update year in footer

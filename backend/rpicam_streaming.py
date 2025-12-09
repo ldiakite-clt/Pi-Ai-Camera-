@@ -1,6 +1,8 @@
+
 """
-Unified camera streaming and detection using rpicam-vid.
-Replaces separate Picamera2 streaming + rpicam-vid detection.
+This file is the heart of our camera streaming and AI detection.
+We use rpicam-vid for both MJPEG streaming and IMX500 person detection.
+No need for separate processes—it's all in one place.
 """
 
 import subprocess
@@ -13,7 +15,8 @@ from collections import deque
 import signal
 import os
 
-# COCO class names
+
+# List of COCO class names (for detection labels)
 COCO_CLASSES = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "", "stop sign", "parking meter", "bench", "bird", "cat",
@@ -31,10 +34,10 @@ COCO_CLASSES = [
 
 class RPiCamStreaming:
     """
-    Unified rpicam-vid instance for both MJPEG streaming and IMX500 detection.
-    Uses stdout for MJPEG, metadata file for detections.
+    This class wraps the rpicam-vid process for both MJPEG streaming and AI detection.
+    We use stdout for MJPEG frames and a metadata file for detection results.
     """
-    
+
     def __init__(
         self,
         width: int = 640,
@@ -46,22 +49,27 @@ class RPiCamStreaming:
         self.height = height
         self.framerate = framerate
         self.metadata_file = Path(metadata_file)
-        
+
         self._process: Optional[subprocess.Popen] = None
         self._running = False
         self._latest_detections: List[Dict] = []
         self._detection_lock = threading.Lock()
         self._monitor_thread: Optional[threading.Thread] = None
-        
+
+        # Only count detections that show up in several frames (avoids false positives)
+        self._detection_history: deque = deque(maxlen=5)  # Last 5 frames
+        self._consecutive_person_frames = 0
+        self._min_consecutive_frames = 3  # Require 3+ consecutive frames with person
+
         # MJPEG streaming state
         self._current_frame: Optional[bytes] = None
         self._frame_lock = threading.Lock()
         self._stream_thread: Optional[threading.Thread] = None
-        
-        # Frame buffering for replay (store last 5 minutes at 15fps = 4500 frames max)
+
+        # Buffer last 5 minutes of frames for replay (at 15fps = 4500 frames)
         self._frame_buffer = deque(maxlen=4500)
         self._buffer_lock = threading.Lock()
-        
+
         print(f"[RPiCamStreaming] Initialized {width}x{height} @ {framerate}fps")
     
     def start(self):
@@ -74,10 +82,14 @@ class RPiCamStreaming:
         if self.metadata_file.exists():
             self.metadata_file.unlink()
         
+        # Use custom config WITHOUT object_detect_draw_cv (no boxes burned into stream)
+        # The default /usr/share/rpi-camera-assets/imx500_mobilenet_ssd.json draws on video
+        config_path = Path(__file__).resolve().parents[1] / "config" / "imx500_person_detection.json"
+        
         # Build command: stream MJPEG to stdout, metadata to file
         cmd = [
             "rpicam-vid",
-            "--post-process-file", "/usr/share/rpi-camera-assets/imx500_mobilenet_ssd.json",
+            "--post-process-file", str(config_path),
             "--width", str(self.width),
             "--height", str(self.height),
             "--framerate", str(self.framerate),
@@ -254,49 +266,122 @@ class RPiCamStreaming:
             pass
     
     def _extract_detections(self, frame_data: Dict):
-        """Extract detections from metadata."""
+        """Extract detections from metadata - MobileNet-SSD format."""
         try:
             if "CnnOutputTensor" not in frame_data:
                 return
             
             tensor = frame_data["CnnOutputTensor"]
-            if not tensor or len(tensor) < 400:
+            if not tensor or len(tensor) < 600:  # Need at least bbox + conf + class data
                 return
             
-            # Extract class IDs from tensor
-            class_ids = []
-            for i in range(len(tensor) - 1, max(len(tensor) - 150, 0), -1):
-                val = tensor[i]
-                if val == 100.0:
-                    break
-                if 0 <= val < 90 and val == int(val):
-                    class_ids.append(int(val))
+            # MobileNet-SSD tensor format (100 detections max):
+            # [0-399]: bounding boxes (100 x 4 values: y1, x1, y2, x2)
+            # [400-499]: confidence scores (100 values, 0.0-1.0)
+            # [500-599]: class IDs (100 values, terminated by 100.0)
             
-            class_ids.reverse()
+            NUM_DETECTIONS = 100
+            BBOX_START = 0
+            CONF_START = NUM_DETECTIONS * 4  # 400
+            CLASS_START = CONF_START + NUM_DETECTIONS  # 500
             
-            if not class_ids:
-                with self._detection_lock:
-                    self._latest_detections = []
-                return
+            # Minimum confidence threshold for person detection
+            # Model outputs low confidence for person, but we need some threshold
+            # Combined with strict bbox size filtering to reduce false positives
+            MIN_CONFIDENCE = 0.10
             
-            # Build detections
             detections = []
-            for class_id in class_ids[:5]:
-                if class_id < len(COCO_CLASSES):
-                    class_name = COCO_CLASSES[class_id]
-                    if class_name:
-                        detections.append({
-                            'class': class_name,
-                            'class_id': class_id,
-                            'confidence': 0.7,
-                            'bbox': [0.0, 0.0, 0.0, 0.0]
-                        })
+            debug_log = []
             
+            for i in range(NUM_DETECTIONS):
+                # Check if we have valid data
+                class_val = tensor[CLASS_START + i] if CLASS_START + i < len(tensor) else None
+                confidence = tensor[CONF_START + i] if CONF_START + i < len(tensor) else None
+                bbox_idx = BBOX_START + (i * 4)
+                y1 = tensor[bbox_idx] if bbox_idx < len(tensor) else None
+                x1 = tensor[bbox_idx + 1] if bbox_idx + 1 < len(tensor) else None
+                y2 = tensor[bbox_idx + 2] if bbox_idx + 2 < len(tensor) else None
+                x2 = tensor[bbox_idx + 3] if bbox_idx + 3 < len(tensor) else None
+                width = (x2 - x1) if (x2 is not None and x1 is not None) else None
+                height = (y2 - y1) if (y2 is not None and y1 is not None) else None
+                area = (width * height) if (width is not None and height is not None) else None
+                
+                debug_log.append(f"Detection {i}: class={class_val} conf={confidence} bbox=({x1},{y1},{x2},{y2}) w={width} h={height} area={area}")
+                
+                # 100.0 marks end of valid detections
+                if class_val is None or class_val == 100.0:
+                    break
+                
+                class_id = int(class_val)
+                
+                # ONLY detect persons (class_id 0)
+                if class_id != 0:
+                    continue
+                
+                # Get confidence for this detection
+                if confidence is None or confidence < MIN_CONFIDENCE:
+                    continue
+                
+                # Get bounding box (format: y1, x1, y2, x2)
+                if None in (x1, y1, x2, y2):
+                    continue
+                
+                # Validate bbox values are in range 0-1
+                if not (0 <= x1 <= 1 and 0 <= y1 <= 1 and 0 <= x2 <= 1 and 0 <= y2 <= 1):
+                    continue
+                
+                # Ensure proper ordering (x2 > x1, y2 > y1)
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                
+                # Calculate width and height
+                width = x2 - x1
+                height = y2 - y1
+                
+                # Filter tiny detections (noise) - require reasonable person-sized bbox
+                # Model outputs low confidence for person, so we rely on size filtering
+                # A real person should take up significant frame space
+                # Width can be narrow (5%) for partial/side views, but height should be 20%+
+                if width < 0.05 or height < 0.20:
+                    continue
+                
+                # Require at least 4% of frame area
+                # This filters out small noise boxes that pass width/height checks
+                area = width * height
+                if area < 0.04:
+                    continue
+                
+                detections.append({
+                    'class': 'person',
+                    'class_id': 0,
+                    'confidence': round(confidence, 2),
+                    'bbox': [round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)]
+                })
+            
+            # Apply temporal filtering: only report detections if consistent across frames
+            has_person = len(detections) > 0
+            self._detection_history.append(has_person)
+            
+            if has_person:
+                self._consecutive_person_frames += 1
+            else:
+                self._consecutive_person_frames = 0
+            
+            print(f"[Detection] Frame: {len(detections)} person(s) detected. Consecutive: {self._consecutive_person_frames}")
+            for log_entry in debug_log:
+                print(f"[Detection] {log_entry}")
+            
+            # Only report detections if we have consistent detection across multiple frames
+            # This prevents single-frame false positives
             with self._detection_lock:
-                self._latest_detections = detections
+                if self._consecutive_person_frames >= self._min_consecutive_frames:
+                    self._latest_detections = detections
+                else:
+                    # Not enough consistent frames yet, report empty
+                    self._latest_detections = []
                     
         except Exception as e:
-            pass
+            print(f"[Detection] Error parsing tensor: {e}")
     
     def get_frame(self) -> Optional[bytes]:
         """Get latest JPEG frame."""

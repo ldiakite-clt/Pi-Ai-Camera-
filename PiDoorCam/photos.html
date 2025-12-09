@@ -8,77 +8,78 @@
   <style>
     #grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 18px;
       margin-top: 20px;
     }
     .photo-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      transition: transform 0.2s, box-shadow 0.2s;
-      cursor: pointer;
       position: relative;
+      cursor: pointer;
+      border-radius: 14px;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08), rgba(15,23,42,0.9));
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
     }
     .photo-card:hover {
       transform: translateY(-4px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 22px 50px rgba(0,0,0,0.32);
+      border-color: rgba(59,130,246,0.35);
     }
     .photo-card img {
       width: 100%;
-      height: 180px;
+      aspect-ratio: 4 / 3;
       object-fit: cover;
       display: block;
+      background: #0b1220;
     }
     .delete-btn {
       position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 28px;
-      height: 28px;
-      background: rgba(220, 38, 38, 0.9);
-      color: white;
+      top: 10px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
+      background: #ef4444;
+      color: #fff;
       border: none;
       border-radius: 50%;
       cursor: pointer;
-      font-size: 18px;
-      font-weight: bold;
+      font-size: 16px;
+      font-weight: 700;
       line-height: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s, transform 0.2s;
-      z-index: 10;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 20px rgba(239,68,68,0.35);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      z-index: 2;
     }
-    .delete-btn:hover {
-      background: rgba(185, 28, 28, 1);
-      transform: scale(1.1);
-    }
-    .delete-btn:active {
-      transform: scale(0.95);
-    }
+    .delete-btn:hover { background: #dc2626; transform: scale(1.05); }
+    .delete-btn:active { transform: scale(0.94); }
     .photo-info {
-      padding: 12px;
-      text-align: center;
+      padding: 12px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
     .photo-date {
-      font-size: 14px;
-      color: #333;
-      font-weight: 500;
-      margin-bottom: 4px;
+      font-size: 15px;
+      color: #e5e7eb;
+      font-weight: 600;
+      letter-spacing: 0.01em;
     }
     .photo-time {
-      font-size: 12px;
-      color: #666;
+      font-size: 13px;
+      color: #94a3b8;
     }
     .no-photos {
       text-align: center;
-      color: #999;
-      padding: 40px;
+      color: #94a3b8;
+      padding: 48px;
       font-size: 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px dashed rgba(148,163,184,0.4);
+      border-radius: 12px;
     }
   </style>
 </head>
@@ -97,7 +98,10 @@
   </nav>
 
   <main class="container">
-    <p>Click any photo to open full-size in a new tab.</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <p style="margin:0;">Click any photo to open full-size in a new tab.</p>
+      <button id="clearPhotos" class="control-btn" style="padding:10px 14px;background:#ef4444;">🗑️ Clear gallery</button>
+    </div>
     <div id="grid"></div>
   </main>
 
@@ -119,22 +123,8 @@
       };
     }
 
-    // Fetch a live frame to use as placeholder
-    async function getLivePlaceholder() {
-      try {
-        const response = await fetch('/camera/frame');
-        const blob = await response.blob();
-        return URL.createObjectURL(blob);
-      } catch (error) {
-        return null;
-      }
-    }
-
     async function load() {
       try {
-        // Get a live frame to use as placeholder while thumbnails load
-        const placeholderUrl = await getLivePlaceholder();
-        
         const r = await fetch('/api/photos');
         const photos = await r.json();
         const grid = document.getElementById('grid');
@@ -183,20 +173,11 @@
           };
           
           const img = document.createElement('img');
-          // Use live frame as placeholder, then load actual thumbnail
-          if (placeholderUrl) {
-            img.src = placeholderUrl;
-          }
-          img.dataset.actualSrc = photo.thumb || photo.path;
-          img.alt = 'Photo';
+          const thumbSrc = photo.thumb || photo.path;
+          img.src = thumbSrc;
+          img.alt = 'Photo thumbnail';
           img.loading = 'lazy';
-          
-          // Replace placeholder with actual thumbnail once loaded
-          const actualImg = new Image();
-          actualImg.onload = () => {
-            img.src = actualImg.src;
-          };
-          actualImg.src = img.dataset.actualSrc;
+          img.onerror = () => { img.src = photo.path; };
           
           const info = document.createElement('div');
           info.className = 'photo-info';
@@ -222,6 +203,16 @@
         console.error('Error loading photos:', error);
         document.getElementById('grid').innerHTML = '<div class="no-photos">Error loading photos</div>';
       }
+
+    document.getElementById('clearPhotos').addEventListener('click', async () => {
+      if (!confirm('Delete all photos? This cannot be undone.')) return;
+      try {
+        await fetch('/api/photos', { method: 'DELETE' });
+        location.reload();
+      } catch (err) {
+        console.error('Failed to clear photos', err);
+      }
+    });
     }
     
     load();
