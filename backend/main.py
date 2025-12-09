@@ -1,5 +1,3 @@
-
-# Standard imports for file and time handling
 import io
 import os
 import time
@@ -7,7 +5,6 @@ import uuid
 from pathlib import Path
 from typing import List
 
-# Async and web stuff
 import asyncio
 import base64
 import zipfile
@@ -16,7 +13,6 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-# Local modules for DB, video, and camera
 from . import database
 from . import video_utils
 from .rpicam_streaming import get_streamer, start_streamer, stop_streamer
@@ -24,18 +20,15 @@ from pathlib import Path
 import io
 from fastapi import BackgroundTasks
 
-# Set up paths for where we keep the frontend and all our data
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "PiDoorCam"
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Fire up FastAPI (our web server)
 app = FastAPI()
 
 
-
-# This class keeps track of all the open WebSocket connections (for live updates)
+# WebSocket manager
 class ConnectionManager:
     def __init__(self):
         self.active: List[WebSocket] = []
@@ -49,7 +42,6 @@ class ConnectionManager:
             self.active.remove(ws)
 
     async def broadcast_json(self, msg: dict):
-        # Send a message to every connected client
         to_remove = []
         for ws in list(self.active):
             try:
@@ -118,117 +110,123 @@ async def frame_broadcaster():
                             img.verify()  # Raises if not a valid JPEG
                             # Save photo
                             photos_dir = DATA_DIR / "photos"
+                            photos_dir.mkdir(parents=True, exist_ok=True)
+                            fname = f"detection-{int(current_time)}.jpg"
+                            path = photos_dir / fname
+                            with open(path, "wb") as fh:
+                                fh.write(frame)
+                            # Generate thumbnail
+                            thumbs_dir = photos_dir / "thumbs"
+                            thumbs_dir.mkdir(parents=True, exist_ok=True)
+                            try:
+                                img = Image.open(io.BytesIO(frame))
+                                img.thumbnail((300, 200))
+                                thumb_path = thumbs_dir / fname
+                                img.save(thumb_path, format="JPEG", quality=75)
+                            except Exception:
+                                pass  # Continue without thumbnail
+                            # Add to photos database
+                            database.add_photo(int(current_time), str(path))
+                            snapshot_path = f"/data/photos/{fname}"
+                            print(f"[Detection] Auto-captured photo: {fname}")
+                            # Notify frontend of new photo
+                            await manager.broadcast_json({
+                                "type": "event",
+                                "name": "photo_taken",
+                                "path": snapshot_path,
+                                "thumb": f"/data/photos/thumbs/{fname}",
+                                "ts": int(current_time)
+                            })
+                        except Exception as e:
+                            print(f"[Detection] Error saving snapshot: {e}")
+                        
+                        # Log event to database for heatmap tracking (with snapshot path)
+                        database.add_event(
+                            timestamp=int(current_time),
+                            label='person',
+                            confidence=confidence,
+                            snapshot_path=snapshot_path
+                        )
+                        
+                        # Send notification to frontend
+                        notification_msg = {
+                            "type": "notification",
+                            "message": f"👤 Person detected ({int(confidence * 100)}% confidence)!",
+                            "severity": "info",
+                            "ts": int(current_time)
+                        }
+                        await manager.broadcast_json(notification_msg)
+                        last_person_notification = current_time
+                        
+                        # Log detection details
+                        print(f"[Detection] Person detected at {time.strftime('%H:%M:%S')} - confidence={confidence:.0%}")
+                        print(f"  - bbox={best_detection['bbox']}")
+                        if snapshot_path:
+                            print(f"  - Snapshot saved and added to heatmap")
+        
+        await asyncio.sleep(interval)
 
-                            # This async function keeps sending frames and detection results to all connected clients
-                            async def frame_broadcaster():
-                                # We use rpicam-vid for both streaming and AI detection. One process, less headache.
-                                streamer = get_streamer()
-                                print("[frame_broadcaster] Using rpicam-vid for streaming + detection")
 
-                                fps = 5  # How many frames per second we send to the browser
-                                interval = 1.0 / fps
+@app.on_event("startup")
+async def startup_event():
+    # Start unified rpicam-vid streamer
+    print("[startup] Starting rpicam-vid streamer...")
+    start_streamer()
+    
+    # kick off background broadcaster
+    asyncio.create_task(frame_broadcaster())
 
-                                last_person_notification = 0
-                                notification_cooldown = 3.0  # Don't spam notifications
 
-                                while True:
-                                    frame = streamer.get_frame()
-                                    detections = streamer.get_detections() if streamer.is_running() else []
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Stop rpicam-vid streamer
+    print("[shutdown] Stopping rpicam-vid streamer...")
+    stop_streamer()
 
-                                    if frame:
-                                        # Send the frame as base64 to the frontend
-                                        b64 = base64.b64encode(frame).decode('ascii')
-                                        msg = {"type": "frame", "data": b64, "ts": int(time.time())}
-                                        await manager.broadcast_json(msg)
 
-                                        # Always send detection results, even if empty (so boxes clear)
-                                        detection_msg = {
-                                            "type": "detections",
-                                            "detections": detections,
-                                            "ts": int(time.time())
-                                        }
-                                        await manager.broadcast_json(detection_msg)
+def mjpeg_generator():
+    """MJPEG stream using rpicam_streaming"""
+    streamer = get_streamer()
+    boundary = b"--frame"
+    while True:
+        frame = streamer.get_frame()
+        if not frame:
+            time.sleep(0.1)
+            continue
+        header = b"Content-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(frame)
+        yield boundary + b"\r\n" + header + frame + b"\r\n"
+        time.sleep(0.05)
 
-                                        # If we see a person, do some cool stuff
-                                        if detections:
-                                            person_detections = [d for d in detections if d['class'] == 'person']
-                                            person_count = len(person_detections)
 
-                                            if person_count > 0:
-                                                current_time = time.time()
-                                                if (current_time - last_person_notification) > notification_cooldown:
-                                                    best_detection = max(person_detections, key=lambda d: d.get('confidence', 0))
-                                                    confidence = best_detection.get('confidence', 0.0)
-                                                    snapshot_path = None
-                                                    try:
-                                                        # Make sure the frame is a valid JPEG before saving
-                                                        img = Image.open(io.BytesIO(frame))
-                                                        img.verify()
-                                                        # Save the photo
-                                                        photos_dir = DATA_DIR / "photos"
-                                                        photos_dir.mkdir(parents=True, exist_ok=True)
-                                                        fname = f"detection-{int(current_time)}.jpg"
-                                                        path = photos_dir / fname
-                                                        with open(path, "wb") as fh:
-                                                            fh.write(frame)
-                                                        # Make a thumbnail for the gallery
-                                                        thumbs_dir = photos_dir / "thumbs"
-                                                        thumbs_dir.mkdir(parents=True, exist_ok=True)
-                                                        try:
-                                                            img = Image.open(io.BytesIO(frame))
-                                                            img.thumbnail((300, 200))
-                                                            thumb_path = thumbs_dir / fname
-                                                            img.save(thumb_path, format="JPEG", quality=75)
-                                                        except Exception:
-                                                            pass  # If thumbnail fails, just skip it
-                                                        # Add photo to the database
-                                                        database.add_photo(int(current_time), str(path))
-                                                        snapshot_path = f"/data/photos/{fname}"
-                                                        print(f"[Detection] Auto-captured photo: {fname}")
-                                                        # Tell the frontend a new photo was taken
-                                                        await manager.broadcast_json({
-                                                            "type": "event",
-                                                            "name": "photo_taken",
-                                                            "path": snapshot_path,
-                                                            "thumb": f"/data/photos/thumbs/{fname}",
-                                                            "ts": int(current_time)
-                                                        })
-                                                    except Exception as e:
-                                                        print(f"[Detection] Error saving snapshot: {e}")
+@app.get("/stream.mjpg")
+def stream_mjpg():
+    return StreamingResponse(mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
-                                                    # Log the event for heatmap tracking
-                                                    database.add_event(
-                                                        timestamp=int(current_time),
-                                                        label='person',
-                                                        confidence=confidence,
-                                                        snapshot_path=snapshot_path
-                                                    )
 
-                                                    # Send a notification to the frontend
-                                                    notification_msg = {
-                                                        "type": "notification",
-                                                        "message": f"👤 Person detected ({int(confidence * 100)}% confidence)!",
-                                                        "severity": "info",
-                                                        "ts": int(current_time)
-                                                    }
-                                                    await manager.broadcast_json(notification_msg)
-                                                    last_person_notification = current_time
+@app.get("/camera/frame")
+def camera_frame():
+    streamer = get_streamer()
+    frame = streamer.get_frame()
+    if not frame:
+        raise HTTPException(status_code=503, detail="Camera not ready")
+    return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
 
-                                                    # Log detection details to the server console
-                                                    print(f"[Detection] Person detected at {time.strftime('%H:%M:%S')} - confidence={confidence:.0%}")
-                                                    print(f"  - bbox={best_detection['bbox']}")
-                                                    if snapshot_path:
-                                                        print(f"  - Snapshot saved and added to heatmap")
 
-                                    await asyncio.sleep(interval)
-
+@app.post("/api/photo")
+async def take_photo(background: BackgroundTasks):
+    streamer = get_streamer()
+    frame = streamer.get_frame()
+    if not frame:
+        raise HTTPException(status_code=503, detail="Camera not ready")
+    photos_dir = DATA_DIR / "photos"
+    photos_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"photo-{int(time.time())}.jpg"
     path = photos_dir / fname
     with open(path, "wb") as fh:
         fh.write(frame)
     # generate a thumbnail to improve gallery load times
     thumbs_dir = photos_dir / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
-    thumb_path = None
     try:
         img = Image.open(io.BytesIO(frame))
         img.thumbnail((300, 200))
