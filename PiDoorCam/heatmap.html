@@ -6,7 +6,6 @@
   <title>PiCam Lite | Heatmap</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="style.css" rel="stylesheet">
-  <script defer src="main.js"></script>
 </head>
 <body data-page="heatmap">
   <header class="site-header">
@@ -22,19 +21,201 @@
   </nav>
 
   <main id="heatmap-main" class="container">
+
     <section>
-      <h2>Today at a glance</h2>
-      <div id="heatmap" class="heatmap" role="img" aria-label="Hourly motion heatmap"></div>
-      <div class="heatmap-axis">
-        <span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
+      <h2 style="text-align:center;">Activity Heatmap (This Week, Person-only)</h2>
+      <div class="heatmap-wrapper" style="max-width: 960px; margin: 0 auto; min-height: 220px;">
+        <div class="heatmap-day-labels">
+          <span>Mon</span>
+          <span>Tue</span>
+          <span>Wed</span>
+          <span>Thu</span>
+          <span>Fri</span>
+          <span>Sat</span>
+          <span>Sun</span>
+        </div>
+        <div id="heatmap" class="heatmap" role="img" aria-label="Hourly motion heatmap">
+          <div id="heatmap-loading" class="muted" style="text-align:center; padding: 16px;">Loading heatmap…</div>
+        </div>
       </div>
-      <p class="muted">Data: /data/motion-today.json on the Pi. Falls back to a sample set for grading.</p>
+      <div class="heatmap-axis" style="max-width: 960px; margin: 6px auto 0;">
+        <span>12AM</span><span>3AM</span><span>6AM</span><span>9AM</span><span>12PM</span><span>3PM</span><span>6PM</span><span>9PM</span>
+      </div>
     </section>
-    <figure class="legend">
-      <img src="https://dummyimage.com/240x40/eeeeee/000000&text=low+%3C%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80%E2%94%80+high" alt="Grayscale legend">
-      <figcaption>Grayscale: darker = more motion.</figcaption>
-    </figure>
+
+    <div class="legend-panel">
+      <div class="legend-item">
+        <div class="legend-color normal-hours"></div>
+        <span>Normal Hours (6AM-11PM)</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color after-hours"></div>
+        <span>After Hours (12AM-5AM) 🚨</span>
+      </div>
+    </div>
+
+    <!-- Thumbnail Gallery (shown when clicking a cell) -->
+    <div id="thumbnail-gallery" class="thumbnail-gallery hidden">
+      <div class="gallery-header">
+        <h3 id="gallery-title">Activity Details</h3>
+        <button class="close-gallery" onclick="closeGallery()">✕</button>
+      </div>
+      <div id="gallery-content" class="gallery-content"></div>
+    </div>
   </main>
+
+  <script>
+    const AFTER_HOURS_START = 0;  // 12AM
+    const AFTER_HOURS_END = 5;    // 5AM
+    const DAY_TO_JS_DAY = [1, 2, 3, 4, 5, 6, 0]; // heatmap day (Mon=0) -> JS getDay (Sun=0)
+
+    let heatmapData = null;
+    // No longer prefetch all photos; we fetch per-cell on demand
+
+    // Fetch heatmap first for faster initial render, then photos.
+    async function loadData() {
+      try {
+        // Fetch heatmap data (last 7 days) and render immediately
+        const heatmapRes = await fetch('/api/heatmap');
+        heatmapData = await heatmapRes.json();
+        renderHeatmap();
+        const l = document.getElementById('heatmap-loading');
+        if (l) l.remove();
+
+        // Photos now fetched on demand per cell to reduce load
+      } catch (err) {
+        console.error('Failed to load data:', err);
+      }
+    }
+
+    function renderHeatmap() {
+      if (!heatmapData) return;
+      
+      const container = document.getElementById('heatmap');
+      container.innerHTML = '';
+      
+      // Calculate max count for intensity scaling
+      let maxCount = 1;
+      Object.values(heatmapData).forEach(dayData => {
+        Object.values(dayData).forEach(count => {
+          maxCount = Math.max(maxCount, count);
+        });
+      });
+      
+      // Render 7 days × 24 hours = 168 cells
+      for (let day = 0; day < 7; day++) {
+        for (let hour = 0; hour < 24; hour++) {
+          const count = heatmapData[day]?.[hour] || 0;
+          const intensity = Math.min(count / maxCount, 1);
+          const isAfterHours = hour >= AFTER_HOURS_START && hour < AFTER_HOURS_END;
+          
+          const cell = document.createElement('div');
+          cell.className = 'heat-cell';
+          cell.dataset.day = day;
+          cell.dataset.hour = hour;
+          cell.dataset.count = count;
+          cell.title = `${getDayName(day)} ${hour}:00 - ${count} detections`;
+          
+          // Apply color based on time period
+          if (isAfterHours) {
+            // Red gradient for after-hours
+            const r = Math.floor(255 * (0.4 + intensity * 0.6));
+            const g = Math.floor(82 * (1 - intensity * 0.5));
+            const b = Math.floor(82 * (1 - intensity * 0.5));
+            cell.style.background = `rgb(${r}, ${g}, ${b})`;
+            
+            if (count > 0) {
+              cell.style.boxShadow = `
+                inset 0 0 0 1px rgba(198, 40, 40, 0.4),
+                0 0 ${8 + intensity * 12}px rgba(255, 82, 82, ${intensity * 0.6})
+              `;
+            }
+          } else {
+            // Blue gradient for normal hours
+            const r = Math.floor(33 * (0.5 + intensity * 0.5));
+            const g = Math.floor(150 * (0.4 + intensity * 0.6));
+            const b = Math.floor(243 * (0.3 + intensity * 0.7));
+            cell.style.background = `rgb(${r}, ${g}, ${b})`;
+            
+            if (count > 0) {
+              cell.style.boxShadow = `inset 0 0 0 1px rgba(33, 150, 243, 0.3)`;
+            }
+          }
+          
+          // Click handler to show photos
+          cell.addEventListener('click', () => showPhotosForCell(day, hour, count, isAfterHours));
+          
+          container.appendChild(cell);
+        }
+      }
+    }
+
+    // Removed stats cards and logic per request
+
+    async function showPhotosForCell(day, hour, count, isAfterHours) {
+      if (count === 0) return;
+      
+      const gallery = document.getElementById('thumbnail-gallery');
+      const content = document.getElementById('gallery-content');
+      const title = document.getElementById('gallery-title');
+      
+      title.textContent = `${getDayName(day)} at ${hour}:00 ${isAfterHours ? '🚨 After Hours' : ''}`;
+      
+      // Fetch up to 3 person snapshots for this specific weekday/hour bucket from backend
+      const weekday = day; // backend expects 0=Mon..6=Sun like our heatmap
+      try {
+        const res = await fetch(`/api/heatmap/photos?weekday=${weekday}&hour=${hour}&days=7&limit=3&label=person`);
+        const filteredPhotos = await res.json();
+      
+        content.innerHTML = '';
+        if (!Array.isArray(filteredPhotos) || filteredPhotos.length === 0) {
+          content.innerHTML = '<p class="muted">No photos captured during this period.</p>';
+        } else {
+          filteredPhotos.forEach(photo => {
+            const photoHour = new Date(photo.timestamp * 1000).getHours();
+            const isPhotoAfterHours = photoHour >= AFTER_HOURS_START && photoHour < AFTER_HOURS_END;
+            const card = document.createElement('div');
+            card.className = `photo-card ${isPhotoAfterHours ? 'after-hours' : ''}`;
+            card.innerHTML = `
+              <img src="${photo.thumb || photo.path}" alt="Detection photo" loading="lazy">
+              ${isPhotoAfterHours ? '<span class="alert-badge">🚨 Alert</span>' : ''}
+              <div class="photo-time">${formatTime(photo.timestamp)}</div>
+            `;
+            content.appendChild(card);
+          });
+        }
+      } catch (e) {
+        content.innerHTML = '<p class="muted">Failed to load photos for this cell.</p>';
+      }
+      
+      gallery.classList.remove('hidden');
+    }
+
+    function closeGallery() {
+      document.getElementById('thumbnail-gallery').classList.add('hidden');
+    }
+
+    function getDayName(day) {
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      return days[day];
+    }
+
+    function formatTime(timestamp) {
+      const date = new Date(timestamp * 1000);
+      return date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    }
+
+    // Initialize on load: render heatmap ASAP
+    loadData();
+    
+    // Update year in footer
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
 
   <footer class="site-footer">
     <small>&copy; <span id="year"></span> PiCam Lite</small>

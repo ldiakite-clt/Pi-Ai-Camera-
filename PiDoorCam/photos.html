@@ -4,73 +4,222 @@
   <meta charset="utf-8">
   <title>PiCam Lite | Photos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="/style.css" rel="stylesheet">
+  <link href="/style.css?v=2" rel="stylesheet">
   <style>
-    .thumb{width:200px;height:150px;object-fit:cover;margin:6px;border:1px solid #ccc}
-    #grid{display:flex;flex-wrap:wrap}
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 18px;
+      margin-top: 20px;
+    }
+    .photo-card {
+      position: relative;
+      cursor: pointer;
+      border-radius: 14px;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08), rgba(15,23,42,0.9));
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .photo-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 22px 50px rgba(0,0,0,0.32);
+      border-color: rgba(59,130,246,0.35);
+    }
+    .photo-card img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      display: block;
+      background: #0b1220;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
+      background: #ef4444;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 20px rgba(239,68,68,0.35);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      z-index: 2;
+    }
+    .delete-btn:hover { background: #dc2626; transform: scale(1.05); }
+    .delete-btn:active { transform: scale(0.94); }
+    .photo-info {
+      padding: 12px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .photo-date {
+      font-size: 15px;
+      color: #e5e7eb;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .photo-time {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .no-photos {
+      text-align: center;
+      color: #94a3b8;
+      padding: 48px;
+      font-size: 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px dashed rgba(148,163,184,0.4);
+      border-radius: 12px;
+    }
   </style>
 </head>
-<body>
+<body data-page="photos">
   <header class="site-header">
     <h1>Photos</h1>
-    <p class="tagline">Captured photos from your live camera</p>
+    <p class="tagline">Captured photos from the Pi camera</p>
   </header>
 
   <nav class="site-nav" aria-label="Primary">
     <a href="index.html" data-link="home">Home</a>
     <a href="live.html" data-link="live">Live</a>
-    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
     <a href="photos.html" data-link="photos">Photos</a>
+    <a href="replays.html" data-link="replays">Replays</a>
+    <a href="heatmap.html" data-link="heatmap">Heatmap</a>
   </nav>
 
   <main class="container">
-    <p>Captured photos from the Pi. Click to open full-size in a new tab.</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <p style="margin:0;">Click any photo to open full-size in a new tab.</p>
+      <button id="clearPhotos" class="control-btn" style="padding:10px 14px;background:#ef4444;">🗑️ Clear gallery</button>
+    </div>
     <div id="grid"></div>
   </main>
+
   <script>
-    // WebSocket listener to append new photos in real-time
-    function appendPhoto(p){
-      const grid = document.getElementById('grid')
-      const a = document.createElement('a')
-      a.href = p.path
-      a.target = '_blank'
-      const img = document.createElement('img')
-      img.src = p.path
-      img.className = 'thumb'
-      a.appendChild(img)
-      // prepend newest
-      grid.insertBefore(a, grid.firstChild)
+    function formatDate(timestamp) {
+      const date = new Date(timestamp * 1000);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[date.getMonth()];
+      const day = date.getDate();
+      const year = date.getFullYear();
+      let hours = date.getHours();
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      
+      return {
+        date: `${month} ${day}, ${year}`,
+        time: `${hours}:${minutes} ${ampm}`
+      };
     }
 
-    async function load(){
-      const r = await fetch('/api/photos')
-      const j = await r.json()
-      const grid = document.getElementById('grid')
-      if(!j || !j.length) grid.textContent = 'No photos yet.'
-      j.forEach(p=>{
-        const a = document.createElement('a')
-        a.href = p.path
-        a.target = '_blank'
-        const img = document.createElement('img')
-        img.src = p.path
-        img.className = 'thumb'
-        a.appendChild(img)
-        grid.appendChild(a)
-      })
-      // connect websocket to receive live photo events
-      try{
-        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws')
-        ws.onmessage = (ev)=>{
-          try{
-            const m = JSON.parse(ev.data)
-            if(m.type === 'event' && m.name === 'photo_taken'){
-              appendPhoto({path: m.path})
-            }
-          }catch(e){ console.warn('ws parse', e) }
+    async function load() {
+      try {
+        const r = await fetch('/api/photos');
+        const photos = await r.json();
+        const grid = document.getElementById('grid');
+        
+        if (!photos || !photos.length) {
+          grid.innerHTML = '<div class="no-photos">No photos yet. Capture your first photo from the Live page!</div>';
+          return;
         }
-      }catch(e){ /* ignore websocket errors */ }
+        
+        // Sort by timestamp descending (most recent first)
+        photos.sort((a, b) => b.timestamp - a.timestamp);
+        
+        photos.forEach(photo => {
+          const card = document.createElement('div');
+          card.className = 'photo-card';
+          card.onclick = () => window.open(photo.path, '_blank');
+          
+          // Add delete button
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'delete-btn';
+          deleteBtn.innerHTML = '×';
+          deleteBtn.title = 'Delete photo';
+          deleteBtn.onclick = async (e) => {
+            e.stopPropagation(); // Prevent opening photo when clicking delete
+            
+            if (confirm('Delete this photo? This cannot be undone.')) {
+              try {
+                deleteBtn.disabled = true;
+                const response = await fetch(`/api/photo/${photo.id}`, { method: 'DELETE' });
+                if (response.ok) {
+                  // Remove card from DOM with animation
+                  card.style.transition = 'opacity 0.3s, transform 0.3s';
+                  card.style.opacity = '0';
+                  card.style.transform = 'scale(0.8)';
+                  setTimeout(() => card.remove(), 300);
+                } else {
+                  alert('Failed to delete photo');
+                  deleteBtn.disabled = false;
+                }
+              } catch (error) {
+                console.error('Delete error:', error);
+                alert('Error deleting photo');
+                deleteBtn.disabled = false;
+              }
+            }
+          };
+          
+          const img = document.createElement('img');
+          const thumbSrc = photo.thumb || photo.path;
+          img.src = thumbSrc;
+          img.alt = 'Photo thumbnail';
+          img.loading = 'lazy';
+          img.onerror = () => { img.src = photo.path; };
+          
+          const info = document.createElement('div');
+          info.className = 'photo-info';
+          
+          const formatted = formatDate(photo.timestamp);
+          
+          const dateDiv = document.createElement('div');
+          dateDiv.className = 'photo-date';
+          dateDiv.textContent = formatted.date;
+          
+          const timeDiv = document.createElement('div');
+          timeDiv.className = 'photo-time';
+          timeDiv.textContent = formatted.time;
+          
+          info.appendChild(dateDiv);
+          info.appendChild(timeDiv);
+          card.appendChild(deleteBtn);
+          card.appendChild(img);
+          card.appendChild(info);
+          grid.appendChild(card);
+        });
+      } catch (error) {
+        console.error('Error loading photos:', error);
+        document.getElementById('grid').innerHTML = '<div class="no-photos">Error loading photos</div>';
+      }
+
+    document.getElementById('clearPhotos').addEventListener('click', async () => {
+      if (!confirm('Delete all photos? This cannot be undone.')) return;
+      try {
+        await fetch('/api/photos', { method: 'DELETE' });
+        location.reload();
+      } catch (err) {
+        console.error('Failed to clear photos', err);
+      }
+    });
     }
-    load()
+    
+    load();
   </script>
+
+  <footer class="site-footer">
+    <small>&copy; <span id="year"></span> PiCam Lite</small>
+  </footer>
 </body>
 </html>

@@ -1,3 +1,5 @@
+
+# Standard imports for file and time handling
 import io
 import os
 import time
@@ -5,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import List
 
+# Async and web stuff
 import asyncio
 import base64
 import zipfile
@@ -13,6 +16,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
+# Local modules for DB, video, and camera
 from . import database
 from . import video_utils
 from .rpicam_streaming import get_streamer, start_streamer, stop_streamer
@@ -20,15 +24,18 @@ from pathlib import Path
 import io
 from fastapi import BackgroundTasks
 
+# Set up paths for where we keep the frontend and all our data
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "PiDoorCam"
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# Fire up FastAPI (our web server)
 app = FastAPI()
 
 
-# WebSocket manager
+
+# This class keeps track of all the open WebSocket connections (for live updates)
 class ConnectionManager:
     def __init__(self):
         self.active: List[WebSocket] = []
@@ -42,6 +49,7 @@ class ConnectionManager:
             self.active.remove(ws)
 
     async def broadcast_json(self, msg: dict):
+        # Send a message to every connected client
         to_remove = []
         for ws in list(self.active):
             try:
@@ -85,97 +93,142 @@ async def frame_broadcaster():
             msg = {"type": "frame", "data": b64, "ts": int(time.time())}
             await manager.broadcast_json(msg)
             
-            # Send detection results
+            # Always send detection results (even empty) so frontend can clear old boxes
+            detection_msg = {
+                "type": "detections",
+                "detections": detections,
+                "ts": int(time.time())
+            }
+            await manager.broadcast_json(detection_msg)
+            
+            # Check for person detection (75%+ confidence) and take action
             if detections:
-                detection_msg = {
-                    "type": "detections",
-                    "detections": detections,
-                    "ts": int(time.time())
-                }
-                await manager.broadcast_json(detection_msg)
+                person_detections = [d for d in detections if d['class'] == 'person']
+                person_count = len(person_detections)
                 
-                # Check for person detection and send notification
-                person_count = sum(1 for d in detections if d['class'] == 'person')
                 if person_count > 0:
                     current_time = time.time()
                     if (current_time - last_person_notification) > notification_cooldown:
-                        notification_msg = {
-                            "type": "notification",
-                            "message": f"👤 {person_count} person{'s' if person_count > 1 else ''} detected!",
-                            "severity": "info",
-                            "ts": int(current_time)
-                        }
-                        await manager.broadcast_json(notification_msg)
-                        last_person_notification = current_time
-                        
-                        # Log detection details
-                        print(f"[Detection] {person_count} person(s) detected at {time.strftime('%H:%M:%S')}")
-                        for det in [d for d in detections if d['class'] == 'person']:
-                            print(f"  - Person: confidence={det['confidence']}, bbox={det['bbox']}")
-        
-        await asyncio.sleep(interval)
+                        best_detection = max(person_detections, key=lambda d: d.get('confidence', 0))
+                        confidence = best_detection.get('confidence', 0.0)
+                        snapshot_path = None
+                        try:
+                            # Validate frame is a JPEG
+                            img = Image.open(io.BytesIO(frame))
+                            img.verify()  # Raises if not a valid JPEG
+                            # Save photo
+                            photos_dir = DATA_DIR / "photos"
 
+                            # This async function keeps sending frames and detection results to all connected clients
+                            async def frame_broadcaster():
+                                # We use rpicam-vid for both streaming and AI detection. One process, less headache.
+                                streamer = get_streamer()
+                                print("[frame_broadcaster] Using rpicam-vid for streaming + detection")
 
-@app.on_event("startup")
-async def startup_event():
-    # Start unified rpicam-vid streamer
-    print("[startup] Starting rpicam-vid streamer...")
-    start_streamer()
-    
-    # kick off background broadcaster
-    asyncio.create_task(frame_broadcaster())
+                                fps = 5  # How many frames per second we send to the browser
+                                interval = 1.0 / fps
 
+                                last_person_notification = 0
+                                notification_cooldown = 3.0  # Don't spam notifications
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    # Stop rpicam-vid streamer
-    print("[shutdown] Stopping rpicam-vid streamer...")
-    stop_streamer()
+                                while True:
+                                    frame = streamer.get_frame()
+                                    detections = streamer.get_detections() if streamer.is_running() else []
 
+                                    if frame:
+                                        # Send the frame as base64 to the frontend
+                                        b64 = base64.b64encode(frame).decode('ascii')
+                                        msg = {"type": "frame", "data": b64, "ts": int(time.time())}
+                                        await manager.broadcast_json(msg)
 
-def mjpeg_generator():
-    """MJPEG stream using rpicam_streaming"""
-    streamer = get_streamer()
-    boundary = b"--frame"
-    while True:
-        frame = streamer.get_frame()
-        if not frame:
-            time.sleep(0.1)
-            continue
-        header = b"Content-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(frame)
-        yield boundary + b"\r\n" + header + frame + b"\r\n"
-        time.sleep(0.05)
+                                        # Always send detection results, even if empty (so boxes clear)
+                                        detection_msg = {
+                                            "type": "detections",
+                                            "detections": detections,
+                                            "ts": int(time.time())
+                                        }
+                                        await manager.broadcast_json(detection_msg)
 
+                                        # If we see a person, do some cool stuff
+                                        if detections:
+                                            person_detections = [d for d in detections if d['class'] == 'person']
+                                            person_count = len(person_detections)
 
-@app.get("/stream.mjpg")
-def stream_mjpg():
-    return StreamingResponse(mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+                                            if person_count > 0:
+                                                current_time = time.time()
+                                                if (current_time - last_person_notification) > notification_cooldown:
+                                                    best_detection = max(person_detections, key=lambda d: d.get('confidence', 0))
+                                                    confidence = best_detection.get('confidence', 0.0)
+                                                    snapshot_path = None
+                                                    try:
+                                                        # Make sure the frame is a valid JPEG before saving
+                                                        img = Image.open(io.BytesIO(frame))
+                                                        img.verify()
+                                                        # Save the photo
+                                                        photos_dir = DATA_DIR / "photos"
+                                                        photos_dir.mkdir(parents=True, exist_ok=True)
+                                                        fname = f"detection-{int(current_time)}.jpg"
+                                                        path = photos_dir / fname
+                                                        with open(path, "wb") as fh:
+                                                            fh.write(frame)
+                                                        # Make a thumbnail for the gallery
+                                                        thumbs_dir = photos_dir / "thumbs"
+                                                        thumbs_dir.mkdir(parents=True, exist_ok=True)
+                                                        try:
+                                                            img = Image.open(io.BytesIO(frame))
+                                                            img.thumbnail((300, 200))
+                                                            thumb_path = thumbs_dir / fname
+                                                            img.save(thumb_path, format="JPEG", quality=75)
+                                                        except Exception:
+                                                            pass  # If thumbnail fails, just skip it
+                                                        # Add photo to the database
+                                                        database.add_photo(int(current_time), str(path))
+                                                        snapshot_path = f"/data/photos/{fname}"
+                                                        print(f"[Detection] Auto-captured photo: {fname}")
+                                                        # Tell the frontend a new photo was taken
+                                                        await manager.broadcast_json({
+                                                            "type": "event",
+                                                            "name": "photo_taken",
+                                                            "path": snapshot_path,
+                                                            "thumb": f"/data/photos/thumbs/{fname}",
+                                                            "ts": int(current_time)
+                                                        })
+                                                    except Exception as e:
+                                                        print(f"[Detection] Error saving snapshot: {e}")
 
+                                                    # Log the event for heatmap tracking
+                                                    database.add_event(
+                                                        timestamp=int(current_time),
+                                                        label='person',
+                                                        confidence=confidence,
+                                                        snapshot_path=snapshot_path
+                                                    )
 
-@app.get("/camera/frame")
-def camera_frame():
-    streamer = get_streamer()
-    frame = streamer.get_frame()
-    if not frame:
-        raise HTTPException(status_code=503, detail="Camera not ready")
-    return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
+                                                    # Send a notification to the frontend
+                                                    notification_msg = {
+                                                        "type": "notification",
+                                                        "message": f"👤 Person detected ({int(confidence * 100)}% confidence)!",
+                                                        "severity": "info",
+                                                        "ts": int(current_time)
+                                                    }
+                                                    await manager.broadcast_json(notification_msg)
+                                                    last_person_notification = current_time
 
+                                                    # Log detection details to the server console
+                                                    print(f"[Detection] Person detected at {time.strftime('%H:%M:%S')} - confidence={confidence:.0%}")
+                                                    print(f"  - bbox={best_detection['bbox']}")
+                                                    if snapshot_path:
+                                                        print(f"  - Snapshot saved and added to heatmap")
 
-@app.post("/api/photo")
-async def take_photo(background: BackgroundTasks):
-    streamer = get_streamer()
-    frame = streamer.get_frame()
-    if not frame:
-        raise HTTPException(status_code=503, detail="Camera not ready")
-    photos_dir = DATA_DIR / "photos"
-    photos_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"photo-{int(time.time())}.jpg"
+                                    await asyncio.sleep(interval)
+
     path = photos_dir / fname
     with open(path, "wb") as fh:
         fh.write(frame)
     # generate a thumbnail to improve gallery load times
     thumbs_dir = photos_dir / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
+    thumb_path = None
     try:
         img = Image.open(io.BytesIO(frame))
         img.thumbnail((300, 200))
@@ -237,15 +290,64 @@ async def delete_photo(photo_id: int):
     return JSONResponse({"success": True, "id": photo_id})
 
 
+@app.delete("/api/photos")
+async def delete_all_photos():
+    """Delete all photos and their files"""
+    paths = database.delete_all_photos()
+    deleted_count = 0
+    
+    photos_dir = DATA_DIR / "photos"
+    thumbs_dir = photos_dir / "thumbs"
+    
+    for path in paths:
+        try:
+            photo_path = Path(path)
+            if photo_path.exists():
+                photo_path.unlink()
+            # Delete thumbnail if exists
+            thumb_path = thumbs_dir / photo_path.name
+            if thumb_path.exists():
+                thumb_path.unlink()
+            deleted_count += 1
+        except Exception as e:
+            print(f"Error deleting photo file: {e}")
+    
+    await manager.broadcast_json({"type": "event", "name": "photos_cleared", "count": deleted_count})
+    return JSONResponse({"success": True, "deleted": deleted_count})
+
+
 @app.get("/api/events")
 def get_events(limit: int = 100):
     rows = database.list_events(limit=limit)
     return JSONResponse(rows)
 
 
+@app.delete("/api/events")
+async def clear_all_events():
+    """Clear all detection events (reset heatmap)"""
+    deleted = database.clear_all_events()
+    await manager.broadcast_json({"type": "event", "name": "events_cleared", "count": deleted})
+    return JSONResponse({"success": True, "deleted": deleted})
+
+
+@app.delete("/api/events/invalid")
+async def clear_invalid_events():
+    """Clear events without snapshots (old false positives)"""
+    deleted = database.clear_events_without_snapshots()
+    await manager.broadcast_json({"type": "event", "name": "invalid_events_cleared", "count": deleted})
+    return JSONResponse({"success": True, "deleted": deleted})
+
+
 @app.get("/api/heatmap")
 def get_heatmap(days: int = 30):
     return JSONResponse(database.heatmap_last_days(days=days))
+
+
+@app.get("/api/heatmap/photos")
+def get_heatmap_photos(weekday: int, hour: int, days: int = 7, limit: int = 3, label: str = 'person'):
+    """Get photos for a specific heatmap cell."""
+    photos = database.get_heatmap_photos(weekday=weekday, hour=hour, days=days, limit=limit, label=label)
+    return JSONResponse(photos)
 
 
 @app.get("/data/enrollments/{eid}/{filename}")
@@ -265,15 +367,16 @@ def photo_file(filename: str):
 
 
 @app.post("/api/replay")
-async def create_replay(seconds: int = 30, background: BackgroundTasks = None):
-    """Create and save a replay as MP4, then return for download"""
+async def create_replay(seconds: int = 30):
+    """Create and save a replay as MP4 in background, return immediately with status"""
     if seconds <= 0 or seconds > 300:
         raise HTTPException(status_code=400, detail="seconds must be 1..300")
     
     streamer = get_streamer()
-    frames = streamer.get_recent_frames(seconds)
-    if not frames:
-        raise HTTPException(status_code=404, detail="no frames available")
+    
+    # Quick check if buffer has any frames (non-blocking)
+    if not streamer.is_running():
+        raise HTTPException(status_code=503, detail="Camera not running")
     
     # Create replays directory
     replays_dir = DATA_DIR / "replays"
@@ -284,45 +387,84 @@ async def create_replay(seconds: int = 30, background: BackgroundTasks = None):
     filename = f"replay-{timestamp}-{seconds}s.mp4"
     output_path = replays_dir / filename
     
-    try:
-        # Convert frames to MP4
-        metadata = video_utils.frames_to_mp4(frames, output_path, fps=5)
-        
-        # Save to database
-        replay_id = database.add_replay(
-            timestamp=timestamp,
-            duration=metadata['duration'],
-            frame_count=metadata['frame_count'],
-            file_size=metadata['file_size'],
-            path=str(output_path)
-        )
-        
-        # Cleanup old replays (keep last 100)
-        old_paths = database.cleanup_old_replays(keep_count=100)
-        for old_path in old_paths:
-            try:
-                Path(old_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-        
-        # Broadcast event to websockets
-        await manager.broadcast_json({
-            "type": "event",
-            "name": "replay_saved",
-            "id": replay_id,
-            "duration": metadata['duration'],
-            "ts": timestamp
-        })
-        
-        # Return file for download
-        return FileResponse(
-            output_path,
-            media_type="video/mp4",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
+    # Run everything in background thread to avoid blocking
+    async def encode_and_save():
+        try:
+            print(f"[replay] Background task started for {seconds}s replay", flush=True)
+            
+            # Get frames in background thread (holds lock briefly)
+            frames = await asyncio.to_thread(streamer.get_recent_frames, seconds)
+            if not frames:
+                print("[replay] No frames available", flush=True)
+                await manager.broadcast_json({
+                    "type": "error",
+                    "message": "No frames available for replay",
+                    "ts": int(time.time())
+                })
+                return
+            
+            # Use the timestamp from the FIRST frame as the video start time
+            # This ensures the displayed time matches the actual video content
+            video_start_timestamp = frames[0][0]
+            
+            print(f"[replay] Got {len(frames)} frames, starting encode...", flush=True)
+            
+            # Run CPU-intensive FFmpeg encoding in thread pool
+            # Use 15fps to match source camera framerate for real-time playback
+            metadata = await asyncio.to_thread(
+                video_utils.frames_to_mp4, frames, output_path, 15
+            )
+            
+            # Save to database with the actual video start time
+            replay_id = await asyncio.to_thread(
+                database.add_replay,
+                video_start_timestamp,
+                metadata['duration'],
+                metadata['frame_count'],
+                metadata['file_size'],
+                str(output_path)
+            )
+            
+            # Cleanup old replays
+            old_paths = await asyncio.to_thread(database.cleanup_old_replays, 100)
+            for old_path in old_paths:
+                try:
+                    Path(old_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            
+            # Broadcast completion
+            await manager.broadcast_json({
+                "type": "event",
+                "name": "replay_saved",
+                "id": replay_id,
+                "duration": metadata['duration'],
+                "path": f"/data/replays/{filename}",
+                "ts": video_start_timestamp
+            })
+            print(f"[replay] Saved: {filename}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[replay] Error encoding: {e}", flush=True)
+            traceback.print_exc()
+            await manager.broadcast_json({
+                "type": "error",
+                "message": f"Replay encoding failed: {str(e)}",
+                "ts": int(time.time())
+            })
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create replay: {str(e)}")
+    # Start background task (non-blocking)
+    asyncio.create_task(encode_and_save())
+    
+    # Return immediately with pending status
+    return JSONResponse({
+        "status": "encoding",
+        "message": "Replay is being created in background",
+        "filename": filename,
+        "path": f"/data/replays/{filename}",
+        "timestamp": timestamp,
+        "seconds": seconds
+    })
 
 
 @app.get("/api/replays")
@@ -363,6 +505,27 @@ async def delete_replay(replay_id: int):
             replay_path.unlink()
     except Exception as e:
         print(f"Error deleting replay file: {e}")
+    
+    return JSONResponse({"success": True, "id": replay_id})
+
+
+@app.delete("/api/replays")
+async def delete_all_replays():
+    """Delete all replays and their files"""
+    paths = database.delete_all_replays()
+    deleted_count = 0
+    
+    for path in paths:
+        try:
+            replay_path = Path(path)
+            if replay_path.exists():
+                replay_path.unlink()
+            deleted_count += 1
+        except Exception as e:
+            print(f"Error deleting replay file: {e}")
+    
+    await manager.broadcast_json({"type": "event", "name": "replays_cleared", "count": deleted_count})
+    return JSONResponse({"success": True, "deleted": deleted_count})
 
 
 @app.post("/api/test/person-detection")
@@ -376,10 +539,6 @@ async def test_person_detection():
     }
     await manager.broadcast_json(notification_msg)
     return {"status": "notification sent"}
-    
-    # Broadcast deletion event
-    await manager.broadcast_json({"type": "event", "name": "replay_deleted", "id": replay_id})
-    return JSONResponse({"success": True, "id": replay_id})
 
 
 @app.websocket("/ws")
@@ -398,6 +557,33 @@ async def websocket_endpoint(ws: WebSocket):
 if DATA_DIR.exists():
     app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
-# Mount frontend static files last so API routes take precedence
+# Mount frontend static files at /ui path (NOT "/" to avoid blocking API routes)
 if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+    app.mount("/ui", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+# Redirect root to frontend
+@app.get("/")
+async def root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui/index.html")
+
+
+# Serve individual HTML pages at root level for convenience
+@app.get("/{page}.html")
+async def serve_html(page: str):
+    from fastapi.responses import FileResponse
+    html_path = FRONTEND_DIR / f"{page}.html"
+    if html_path.exists():
+        return FileResponse(html_path, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Page not found")
+
+
+# Serve CSS at root level
+@app.get("/style.css")
+async def serve_css():
+    from fastapi.responses import FileResponse
+    css_path = FRONTEND_DIR / "style.css"
+    if css_path.exists():
+        return FileResponse(css_path, media_type="text/css")
+    raise HTTPException(status_code=404, detail="CSS not found")
