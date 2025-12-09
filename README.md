@@ -4,9 +4,6 @@
 #
 # Here’s a plain summary of the Pi-Ai-Camera project:
 #
-# Repo & Branch
-# GitHub: https://github.com/ldiakite-clt/Pi-Ai-Camera-
-# Branch: main
 #
 # Backend files:
 # main.py: Runs the FastAPI server, handles camera, photos, replays, and browser stuff.
