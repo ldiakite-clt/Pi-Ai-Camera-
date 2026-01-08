@@ -1,55 +1,46 @@
-#================================================================================
-# Pi-Ai-Camera README - December 8, 2025
-#================================================================================
-#
-# Here’s a plain summary of the Pi-Ai-Camera project:
-#
-# Repo & Branch
-# GitHub: https://github.com/ldiakite-clt/Pi-Ai-Camera-
-# Branch: main
-#
-# Backend files:
-# main.py: Runs the FastAPI server, handles camera, photos, replays, and browser stuff.
-# rpicam_streaming.py: Connects to the Pi camera, streams video, and does person detection.
-# database.py: Tracks photos, events, and replays using SQLite.
-# video_utils.py: Makes MP4 videos from images for replays.
-# requirements.txt: Python packages you need.
-#
-# Frontend:
-# All the HTML files for the web interface are in PiDoorCam/ (live view, gallery, replays, heatmap, etc.).
-# style.css for the look.
-#
-# How to check if it’s working:
-# Run verify_system.sh to see what’s running and what files are there.
-# Run test_clone_access.sh to make sure you can clone and use the repo anywhere.
-#
-# Current Status:
-# Server is running (Uvicorn + FastAPI)
-# Camera process is up (rpicam-vid, IMX500 firmware loaded)
-# You can get to it on your local network at: http://<your-pi-ip>:8080
-# Photos and replays are saved in the data/ folder
-#
-# How to use it:
-# 1. SSH into your Pi
-# 2. Go to the project folder: cd /home/thela/Pi-Ai-Camera-
-# 3. Pull any new changes: git pull origin main
-# 4. Activate Python: source backend/venv/bin/activate
-# 5. Start the server: uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
-# 6. Open the web UI in your browser
-#
-# How it works:
-# The Pi camera streams video and runs AI to spot people.
-# You can take photos or save short video clips (replays) from the web page.
-# Everything is saved so you can look back at events or download clips.
-#
-# Why this setup?
-# It’s simple, works with official Pi stuff, and doesn’t use much CPU.
-# No weird threading bugs.
-# Easy to use and maintain.
-#
-# Everything is committed and pushed.
-# If you ever need to check, just run the verification scripts or look at the README.
-#
-#================================================================================
-# End of README
-#================================================================================
+# Pi-Ai-Camera Deployment Summary (December 8, 2025)
+
+This project was for my Front-End Web Development class. It is a Raspberry Pi camera setup that uses AI to detect people, supports live viewing, photo capture, and short video clips ("replays"). Accesible via simple website on local network, as well as Tailscale VPN.
+
+GitHub: https://github.com/ldiakite-clt/Pi-Ai-Camera-  
+Branch: `main`
+
+## What's in the backend
+
+- `main.py`  
+  Runs the web server and handles all requests. Streams live video, takes photos, and saves replays.
+
+- `rpicam_streaming.py`  
+  Interfaces with the camera and runs AI person detection. Streams video and detects people in real time.
+
+- `database.py`  
+  Stores metadata for photos, events, and replays using SQLite.
+
+- `video_utils.py`  
+  Builds MP4 replay clips from image frames using `ffmpeg` (used for the replay feature).
+
+- `requirements.txt`  
+  Python dependencies.
+
+Note: Other files are old or for reference. The main system uses `rpicam-vid` for everything now.
+
+## What's in the frontend
+
+- `PiDoorCam/`  
+  Website pages and styles:
+  - `live.html`: Live view, take photos, save replays
+  - `photos.html`: View and delete photos
+  - `replays.html`: Download and delete replay clips
+  - `heatmap.html`: Shows when/where motion happened
+  - `style.css`: Site-wide styling
+
+## How to use it
+
+1. I SSH into Pi and open the project folder:
+   ```bash
+   cd /home/thela/Desktop/Pi-Ai-Camera-
+
+2. ./verify_system.sh
+
+3. pkill -f uvicorn
+./run.sh
